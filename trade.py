@@ -46,46 +46,45 @@ def position_exists(symbol, direction):
 
 def execute_trade(symbol, side, quantity, entry_price, leverage, sl_price, tp_price, trailing_stop_callback_rate=0.8):
     try:
-        side_enum = SIDE_BUY if side == "LONG" else SIDE_SELL
-        opposite = SIDE_SELL if side_enum == SIDE_BUY else SIDE_BUY
-
         client.futures_change_leverage(symbol=symbol, leverage=leverage)
+        order_side = "BUY" if side == "LONG" else "SELL"
+        opposite_side = "SELL" if side == "LONG" else "BUY"
 
         client.futures_create_order(
             symbol=symbol,
-            side=side_enum,
-            type=ORDER_TYPE_MARKET,
+            side=order_side,
+            type="MARKET",
             quantity=quantity
         )
 
         client.futures_create_order(
             symbol=symbol,
-            side=opposite,
-            type=ORDER_TYPE_STOP_MARKET,
+            side=opposite_side,
+            type="STOP_MARKET",
             stopPrice=round(sl_price, 2),
             closePosition=True,
-            timeInForce=TIME_IN_FORCE_GTC
+            timeInForce="GTC"
         )
 
         client.futures_create_order(
             symbol=symbol,
-            side=opposite,
-            type=ORDER_TYPE_TAKE_PROFIT_MARKET,
+            side=opposite_side,
+            type="TAKE_PROFIT_MARKET",
             stopPrice=round(tp_price, 2),
             closePosition=True,
-            timeInForce=TIME_IN_FORCE_GTC
+            timeInForce="GTC"
         )
 
         client.futures_create_order(
             symbol=symbol,
-            side=opposite,
-            type=ORDER_TYPE_TRAILING_STOP_MARKET,
+            side=opposite_side,
+            type="TRAILING_STOP_MARKET",
             callbackRate=trailing_stop_callback_rate,
-            activationPrice=round(entry_price, 2),
+            activationPrice=round(entry_price * (1.01 if side == "LONG" else 0.99), 2),
             closePosition=True
         )
 
         return True
     except Exception as e:
-        print(f"❌ Error execute_trade: {e}")
+        print(f"[EXECUTE ERROR] {e}")
         return False
