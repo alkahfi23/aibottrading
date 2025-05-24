@@ -3,6 +3,8 @@
 from binance.client import Client
 from binance.enums import *
 import os
+import math
+
 
 client = Client(os.getenv("BINANCE_API_KEY"), os.getenv("BINANCE_API_SECRET"))
 
