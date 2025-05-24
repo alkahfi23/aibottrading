@@ -114,7 +114,7 @@ def place_trailing_stop(symbol, side, quantity, callback_rate):
         reduceOnly=True
     )
 
-def calculate_atr(symbol, interval='1m', period=20):
+def calculate_atr(symbol, interval='5m', period=20):
     try:
         klines = client.futures_klines(symbol=symbol, interval=interval, limit=period+1)
         trs = []
