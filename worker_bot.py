@@ -3,7 +3,6 @@ import time
 import requests
 from binance.client import Client
 from binance.enums import *
-from decimal import Decimal, ROUND_DOWN
 import numpy as np
 
 # === SETUP ===
@@ -13,7 +12,7 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 client = Client(API_KEY, API_SECRET)
-last_signal = {}  # Untuk menghindari notifikasi duplikat
+last_signal = {}  # Hindari duplikat notifikasi
 
 # === TOOLS ===
 def send_to_telegram(message):
@@ -59,24 +58,25 @@ def detect_signal(symbol):
     try:
         timeframes = {"1m": 20, "5m": 20, "15m": 20}
         trend_confirm = {}
+        closes = []
 
         for tf, limit in timeframes.items():
             klines = get_klines(symbol, tf, limit)
             if not klines:
                 continue
-            closes = [float(k[4]) for k in klines]
-            ema4 = calculate_ema(closes, 4)
-            ema20 = calculate_ema(closes, 20)
-
+            tf_closes = [float(k[4]) for k in klines]
+            ema4 = calculate_ema(tf_closes, 4)
+            ema20 = calculate_ema(tf_closes, 20)
             trend_confirm[tf] = "LONG" if ema4 > ema20 else "SHORT"
+            if tf == "1m":
+                closes = tf_closes  # gunakan close terakhir dari 1m
 
-        # Mayoritas konfirmasi arah
         if list(trend_confirm.values()).count("LONG") >= 2:
             return "LONG", closes[-1], calculate_fibonacci_support_resistance(closes)
         elif list(trend_confirm.values()).count("SHORT") >= 2:
             return "SHORT", closes[-1], calculate_fibonacci_support_resistance(closes)
         else:
-            return "NONE", closes[-1], {}
+            return "NONE", closes[-1] if closes else 0.0, {}
 
     except Exception as e:
         print(f"❌ Error detect_signal: {e}")
@@ -98,16 +98,11 @@ def notify_signal(symbol):
     last_signal[key] = signal
     fibo_str = "\n".join([f"🔹 {k}: {v:.2f}" for k, v in fibo.items()])
     message = (
-        f"📢 Sinyal Trading Futures
-"
-        f"📍 Symbol: {symbol}
-"
-        f"🧭 Sinyal: {signal}
-"
-        f"💵 Harga: {price}
-"
-        f"📐 Fibonacci Support/Resistance:
-{fibo_str}"
+        f"📢 Sinyal Trading Futures\n"
+        f"📍 Symbol: {symbol}\n"
+        f"🧭 Sinyal: {signal}\n"
+        f"💵 Harga Saat Ini: {price:.2f}\n"
+        f"📐 Fibonacci Levels:\n{fibo_str}"
     )
     send_to_telegram(message)
 
@@ -117,7 +112,7 @@ def main():
     symbol = "BTCUSDT"
     while True:
         notify_signal(symbol)
-        time.sleep(60)  # cek tiap 1 menit
+        time.sleep(60)  # Cek sinyal setiap 1 menit
 
 
 if __name__ == "__main__":
