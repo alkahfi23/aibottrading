@@ -161,12 +161,26 @@ def execute_trade(symbol, side, quantity, entry_price, leverage, position_side="
 
         cancel_existing_exit_orders(symbol)
 
-        if sl_price:
-            if (side == "LONG" and sl_price < current_price) or (side == "SHORT" and sl_price > current_price):
-                place_sl_order(symbol, side, sl_price)
-                print(f"🔒 SL set at {sl_price}")
+                ### STOP LOSS ADAPTIF
+        if sl_price is None:
+            if atr:
+                sl_multiplier = 1.2  # bisa diatur sesuai selera
+                if side == "LONG":
+                    sl_price = current_price - atr * sl_multiplier
+                else:
+                    sl_price = current_price + atr * sl_multiplier
+                print(f"🔒 SL adaptif berdasarkan ATR: {sl_price:.2f}")
             else:
-                print(f"⚠️ SL dibatalkan karena akan langsung trigger (current: {current_price}, SL: {sl_price})")
+                sl_price = current_price * (1 - 0.005) if side == "LONG" else current_price * (1 + 0.005)
+                print(f"🔒 SL fallback: {sl_price:.2f}")
+
+        # Validasi bahwa SL tidak langsung trigger
+        if (side == "LONG" and sl_price < current_price) or (side == "SHORT" and sl_price > current_price):
+            place_sl_order(symbol, side, sl_price)
+            print(f"🔒 SL set at {sl_price}")
+        else:
+            print(f"⚠️ SL dibatalkan karena terlalu dekat (current: {current_price}, SL: {sl_price})")
+
 
         MIN_PROFIT_MARGIN = 0.0015
         atr = calculate_atr(symbol, interval='1m', period=20)
