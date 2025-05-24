@@ -1,120 +1,105 @@
-import os, time, datetime
-import pandas as pd
+import os
+import time
 import requests
-from datetime import datetime, timezone
-from ta.trend import EMAIndicator, ADXIndicator, MACD
-from ta.momentum import RSIIndicator
-from ta.volatility import BollingerBands, AverageTrueRange
+from binance.client import Client
+from dotenv import load_dotenv
 
-from trade import execute_trade, position_exists, close_opposite_position
-from notifikasi import kirim_notifikasi_order, kirim_notifikasi_penutupan
-from utils import get_futures_balance, set_leverage, get_dynamic_leverage, get_dynamic_risk_pct
+load_dotenv()
 
-BASE_URL = "https://api.binance.com"
-SYMBOLS = ["BTCUSDT"]
-INTERVAL = "1m"
-LIMIT = 100
+client = Client(os.getenv("BINANCE_API_KEY"), os.getenv("BINANCE_API_SECRET"))
 
-def get_klines(symbol, interval, limit):
-    url = f"{BASE_URL}/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
-    res = requests.get(url)
-    data = res.json()
-    df = pd.DataFrame(data, columns=[
-        'open_time', 'open', 'high', 'low', 'close', 'volume',
-        'close_time', 'qav', 'num_trades', 'taker_base_vol', 'taker_quote_vol', 'ignore'
-    ])
-    df['open_time'] = pd.to_datetime(df['open_time'], unit='ms')
-    df[['open', 'high', 'low', 'close', 'volume']] = df[['open', 'high', 'low', 'close', 'volume']].astype(float)
-    return df
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-def calculate_indicators(df):
-    df['ema'] = EMAIndicator(df['close'], window=20).ema_indicator()
-    df['rsi'] = RSIIndicator(df['close'], window=14).rsi()
-    df['adx'] = ADXIndicator(df['high'], df['low'], df['close'], window=14).adx()
-    macd = MACD(df['close'])
-    df['macd'], df['macd_signal'] = macd.macd(), macd.macd_signal()
-    bb = BollingerBands(df['close'], window=20, window_dev=2)
-    df['bb_upper'], df['bb_lower'] = bb.bollinger_hband(), bb.bollinger_lband()
-    df['volume_ma20'] = df['volume'].rolling(window=20).mean()
-    df['volume_spike'] = df['volume'] > df['volume_ma20'] * 2
-    atr = AverageTrueRange(df['high'], df['low'], df['close'], window=14)
-    df['atr'] = atr.average_true_range()
-    return df
+def send_telegram(msg):
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": CHAT_ID,
+        "text": msg,
+        "parse_mode": "Markdown"
+    }
+    requests.post(url, json=payload)
 
-def enhanced_signal(df):
-    latest, prev = df.iloc[-1], df.iloc[-2]
-    score_long = sum([
-        prev["macd"] < prev["macd_signal"] and latest["macd"] > latest["macd_signal"],
-        latest["close"] > latest["ema"],
-        latest["rsi"] > 48,
-        latest["close"] > latest["bb_upper"],
-        latest["volume_spike"],
-        latest["adx"] > 15
-    ])
-    score_short = sum([
-        prev["macd"] > prev["macd_signal"] and latest["macd"] < latest["macd_signal"],
-        latest["close"] < latest["ema"],
-        latest["rsi"] < 52,
-        latest["close"] < latest["bb_lower"],
-        latest["volume_spike"],
-        latest["adx"] > 15
-    ])
-    if score_long >= 3: return "LONG"
-    if score_short >= 3: return "SHORT"
-    return ""
+def get_ema(closes, length):
+    return sum(closes[-length:]) / length
 
-def get_sleep_duration_for_1m_candle():
-    now = datetime.now(timezone.utc)
-    seconds_past_minute = now.second + now.microsecond / 1_000_000
-    return max(0.1, 60 - seconds_past_minute)
+def get_fibonacci_levels(high, low):
+    diff = high - low
+    levels = {
+        "0.236": high - 0.236 * diff,
+        "0.382": high - 0.382 * diff,
+        "0.5": high - 0.5 * diff,
+        "0.618": high - 0.618 * diff,
+        "0.786": high - 0.786 * diff,
+    }
+    return levels
 
-def main_loop():
-    while True:
-        try:
-            for symbol in SYMBOLS:
-                df = get_klines(symbol, INTERVAL, LIMIT)
-                if df.empty or len(df) < 20:
-                    continue
+def trend_direction(symbol, interval):
+    try:
+        klines = client.futures_klines(symbol=symbol, interval=interval, limit=20)
+        closes = [float(k[4]) for k in klines]
+        ema4 = get_ema(closes, 4)
+        ema20 = get_ema(closes, 20)
+        return "UP" if ema4 > ema20 else "DOWN"
+    except:
+        return "UNKNOWN"
 
-                df = calculate_indicators(df)
-                signal = enhanced_signal(df)
-                latest = df.iloc[-1]
-                entry_price = latest["close"]
+def detect_signal(symbol="BTCUSDT"):
+    try:
+        klines_1m = client.futures_klines(symbol=symbol, interval="1m", limit=50)
+        closes_1m = [float(k[4]) for k in klines_1m]
+        volumes_1m = [float(k[5]) for k in klines_1m]
 
-                balance = get_futures_balance()
-                leverage = get_dynamic_leverage(balance)
-                risk_pct = get_dynamic_risk_pct(balance)
+        volume_now = volumes_1m[-1]
+        volume_avg = sum(volumes_1m[:-1]) / (len(volumes_1m) - 1)
 
-                set_leverage(symbol, leverage)
+        if volume_now <= 1.5 * volume_avg:
+            print("⏳ Tidak ada volume spike.")
+            return
 
-                if signal and not position_exists(symbol, signal):
-                    # Tutup posisi lawan dulu
-                    close_opposite_position(symbol, signal)
+        ema4 = get_ema(closes_1m, 4)
+        ema20 = get_ema(closes_1m, 20)
+        price_now = closes_1m[-1]
 
-                    # Eksekusi trade sesuai signal dengan parameter sesuai trade.py
-                    success = execute_trade(
-                        symbol=symbol,
-                        signal=signal,
-                        leverage=leverage,
-                        risk=risk_pct,
-                        trailing_stop=True
-                    )
+        trend_1m = trend_direction(symbol, "1m")
+        trend_5m = trend_direction(symbol, "5m")
+        trend_15m = trend_direction(symbol, "15m")
 
-                    if success:
-                        kirim_notifikasi_order(symbol, signal, leverage, "qty calculated internally")
-                        print(f"✅ Order executed: {signal} {symbol}")
-                    else:
-                        print(f"❌ Gagal eksekusi order {symbol}")
-                else:
-                    print(f"ℹ️ Tidak ada sinyal baru atau posisi sudah terbuka: {symbol}")
+        high = max(closes_1m)
+        low = min(closes_1m)
+        fib = get_fibonacci_levels(high, low)
 
-            time.sleep(get_sleep_duration_for_1m_candle())
+        if ema4 > ema20 and trend_1m == trend_5m == trend_15m == "UP":
+            signal = "LONG"
+        elif ema4 < ema20 and trend_1m == trend_5m == trend_15m == "DOWN":
+            signal = "SHORT"
+        else:
+            signal = "⚠️ Mixed Trend - Wait"
 
-        except Exception as e:
-            print(f"[ERROR LOOP] {e}")
-            with open("errors.log", "a") as f:
-                f.write(f"[{datetime.utcnow()}] ERROR: {str(e)}\n")
-            time.sleep(30)
+        msg = (
+            f"📡 *Sinyal Trading Futures*\n\n"
+            f"📊 Pair: `{symbol}`\n"
+            f"🕒 Volume Spike: `{volume_now:.2f}` > avg `{volume_avg:.2f}`\n"
+            f"📈 EMA(4): `{ema4:.2f}`\n"
+            f"📉 EMA(20): `{ema20:.2f}`\n\n"
+            f"🧠 Trend:\n"
+            f" - 1m: `{trend_1m}`\n"
+            f" - 5m: `{trend_5m}`\n"
+            f" - 15m: `{trend_15m}`\n\n"
+            f"🎯 *Rekomendasi*: *{signal}*\n\n"
+            f"📐 Fibonacci:\n"
+            f" - 0.236: `{fib['0.236']:.2f}`\n"
+            f" - 0.382: `{fib['0.382']:.2f}`\n"
+            f" - 0.5: `{fib['0.5']:.2f}`\n"
+            f" - 0.618: `{fib['0.618']:.2f}`\n"
+            f" - 0.786: `{fib['0.786']:.2f}`"
+        )
 
-if __name__ == "__main__":
-    main_loop()
+        send_telegram(msg)
+        print("✅ Sinyal dikirim!")
+    except Exception as e:
+        print(f"❌ Gagal deteksi sinyal: {e}")
+
+while True:
+    detect_signal("BTCUSDT")
+    time.sleep(60)  # Cek setiap 1 menit
