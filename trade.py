@@ -80,7 +80,6 @@ def validate_trend_5m(symbol, signal):
 
 def execute_trade(symbol, side, quantity, entry_price, leverage, position_side="BOTH", sl_price=None, tp_price=None, trailing_stop_callback_rate=None):
     try:
-        # Validasi trend dari 5 menit
         if not validate_trend_5m(symbol, side):
             print("❌ Trade dibatalkan karena trend 5m bertentangan dengan sinyal.")
             return False
@@ -92,7 +91,10 @@ def execute_trade(symbol, side, quantity, entry_price, leverage, position_side="
             print("❌ Quantity too small to execute.")
             return False
 
-        close_opposite_position(symbol, side)
+        if position_exists(symbol, side):
+            print("ℹ️ Posisi sudah ada, skip close lawan.")
+        else:
+            close_opposite_position(symbol, side)
 
         order = client.futures_create_order(
             symbol=symbol,
@@ -103,24 +105,33 @@ def execute_trade(symbol, side, quantity, entry_price, leverage, position_side="
         )
         print(f"✅ Market order executed: {order['orderId']}")
 
+        current_price = float(client.futures_mark_price(symbol=symbol)['markPrice'])
+
         if sl_price:
-            client.futures_create_order(
-                symbol=symbol,
-                side=SIDE_SELL if side == "LONG" else SIDE_BUY,
-                type="STOP_MARKET",
-                stopPrice=round(sl_price, 2),
-                closePosition=True,
-            )
-            print(f"🔒 SL set at {sl_price}")
+            if (side == "LONG" and sl_price < current_price) or (side == "SHORT" and sl_price > current_price):
+                client.futures_create_order(
+                    symbol=symbol,
+                    side=SIDE_SELL if side == "LONG" else SIDE_BUY,
+                    type="STOP_MARKET",
+                    stopPrice=round(sl_price, 2),
+                    closePosition=True,
+                )
+                print(f"🔒 SL set at {sl_price}")
+            else:
+                print(f"⚠️ SL dibatalkan karena akan langsung trigger (current: {current_price}, SL: {sl_price})")
+
         if tp_price:
-            client.futures_create_order(
-                symbol=symbol,
-                side=SIDE_SELL if side == "LONG" else SIDE_BUY,
-                type="TAKE_PROFIT_MARKET",
-                stopPrice=round(tp_price, 2),
-                closePosition=True,
-            )
-            print(f"🎯 TP set at {tp_price}")
+            if (side == "LONG" and tp_price > current_price) or (side == "SHORT" and tp_price < current_price):
+                client.futures_create_order(
+                    symbol=symbol,
+                    side=SIDE_SELL if side == "LONG" else SIDE_BUY,
+                    type="TAKE_PROFIT_MARKET",
+                    stopPrice=round(tp_price, 2),
+                    closePosition=True,
+                )
+                print(f"🎯 TP set at {tp_price}")
+            else:
+                print(f"⚠️ TP dibatalkan karena akan langsung trigger (current: {current_price}, TP: {tp_price})")
 
         if trailing_stop_callback_rate:
             client.futures_create_order(
