@@ -115,6 +115,21 @@ def place_trailing_stop(symbol, side, quantity, callback_rate):
         callbackRate=callback_rate,
         reduceOnly=True
     )
+def calculate_atr(symbol, interval='1m', period=20):
+    try:
+        klines = client.futures_klines(symbol=symbol, interval=interval, limit=period+1)
+        trs = []
+        for i in range(1, len(klines)):
+            high = float(klines[i][2])
+            low = float(klines[i][3])
+            prev_close = float(klines[i-1][4])
+            tr = max(high - low, abs(high - prev_close), abs(low - prev_close))
+            trs.append(tr)
+        atr = sum(trs) / len(trs)
+        return atr
+    except Exception as e:
+        print(f"❌ Gagal hitung ATR: {e}")
+        return None
 
 def execute_trade(symbol, side, quantity, entry_price, leverage, position_side="BOTH", sl_price=None, tp_price=None, trailing_stop_callback_rate=None):
     try:
@@ -155,13 +170,24 @@ def execute_trade(symbol, side, quantity, entry_price, leverage, position_side="
             else:
                 print(f"⚠️ SL dibatalkan karena akan langsung trigger (current: {current_price}, SL: {sl_price})")
 
-        if tp_price:
-            if (side == "LONG" and tp_price > current_price) or (side == "SHORT" and tp_price < current_price):
-                place_tp_order(symbol, side, tp_price)
-                print(f"🎯 TP set at {tp_price}")
+            # Estimasi TP adaptif berdasarkan ATR
+            MIN_PROFIT_MARGIN = 0.0015  # minimal
+            atr = calculate_atr(symbol, interval='1m', period=20)
+            if tp_price is None and atr:
+                k = 1.5  # multiplier agresivitas
+            if side == "LONG":
+                tp_price = current_price + max(current_price * MIN_PROFIT_MARGIN, atr * k)
             else:
-                print(f"⚠️ TP dibatalkan karena akan langsung trigger (current: {current_price}, TP: {tp_price})")
-
+                tp_price = current_price - max(current_price * MIN_PROFIT_MARGIN, atr * k)
+                print(f"📈 TP adaptif berdasarkan ATR: {tp_price:.2f}")
+            elif tp_price is None:
+            # fallback kalau gagal ATR
+            if side == "LONG":
+                tp_price = current_price * (1 + MIN_PROFIT_MARGIN)
+            else:
+                tp_price = current_price * (1 - MIN_PROFIT_MARGIN)
+                print(f"📈 TP fallback: {tp_price:.2f}")
+                
         if trailing_stop_callback_rate:
             place_trailing_stop(symbol, side, quantity, trailing_stop_callback_rate)
             print(f"📉 Trailing stop set at {trailing_stop_callback_rate}%")
