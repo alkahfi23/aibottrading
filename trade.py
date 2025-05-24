@@ -1,13 +1,5 @@
 from binance.client import Client
-from binance.enums import (
-    SIDE_BUY,
-    SIDE_SELL,
-    ORDER_TYPE_MARKET,
-    ORDER_TYPE_STOP_MARKET,
-    ORDER_TYPE_TAKE_PROFIT_MARKET,
-    ORDER_TYPE_TRAILING_STOP_MARKET,
-    TIME_IN_FORCE_GTC,
-)
+import binance.enums as enums
 import os
 import math
 
