@@ -63,10 +63,8 @@ def validate_trend_5m(symbol, signal):
     try:
         klines = client.futures_klines(symbol=symbol, interval='5m', limit=20)
         closes = [float(k[4]) for k in klines]
-
         ema5 = sum(closes[-5:]) / 5
         ema20 = sum(closes) / 20
-
         if signal == "LONG" and ema5 > ema20:
             return True
         elif signal == "SHORT" and ema5 < ema20:
@@ -115,6 +113,7 @@ def place_trailing_stop(symbol, side, quantity, callback_rate):
         callbackRate=callback_rate,
         reduceOnly=True
     )
+
 def calculate_atr(symbol, interval='1m', period=20):
     try:
         klines = client.futures_klines(symbol=symbol, interval=interval, limit=period+1)
@@ -144,10 +143,10 @@ def execute_trade(symbol, side, quantity, entry_price, leverage, position_side="
             print("❌ Quantity too small to execute.")
             return False
 
-        if position_exists(symbol, side):
-            print("ℹ️ Posisi sudah ada, skip close lawan.")
-        else:
+        if not position_exists(symbol, side):
             close_opposite_position(symbol, side)
+        else:
+            print("ℹ️ Posisi sudah ada, skip close lawan.")
 
         order = client.futures_create_order(
             symbol=symbol,
@@ -160,7 +159,6 @@ def execute_trade(symbol, side, quantity, entry_price, leverage, position_side="
 
         current_price = float(client.futures_mark_price(symbol=symbol)['markPrice'])
 
-        # Cancel existing exit orders (SL/TP/Trailing) before setting new ones
         cancel_existing_exit_orders(symbol)
 
         if sl_price:
@@ -170,24 +168,26 @@ def execute_trade(symbol, side, quantity, entry_price, leverage, position_side="
             else:
                 print(f"⚠️ SL dibatalkan karena akan langsung trigger (current: {current_price}, SL: {sl_price})")
 
-        # Estimasi TP adaptif berdasarkan ATR
-        MIN_PROFIT_MARGIN = 0.0015  # minimal
+        MIN_PROFIT_MARGIN = 0.0015
         atr = calculate_atr(symbol, interval='1m', period=20)
-        if tp_price is None and atr:
-            k = 1.5  # multiplier agresivitas
-        if side == "LONG":
-            tp_price = current_price + max(current_price * MIN_PROFIT_MARGIN, atr * k)
-        else:
-            tp_price = current_price - max(current_price * MIN_PROFIT_MARGIN, atr * k)
-            print(f"📈 TP adaptif berdasarkan ATR: {tp_price:.2f}")
-            elif tp_price is None:
-        # fallback kalau gagal ATR
-        if side == "LONG":
-            tp_price = current_price * (1 + MIN_PROFIT_MARGIN)
-        else:
-            tp_price = current_price * (1 - MIN_PROFIT_MARGIN)
-            print(f"📈 TP fallback: {tp_price:.2f}")
-                
+
+        if tp_price is None:
+            if atr:
+                k = 1.5
+                if side == "LONG":
+                    tp_price = current_price + max(current_price * MIN_PROFIT_MARGIN, atr * k)
+                else:
+                    tp_price = current_price - max(current_price * MIN_PROFIT_MARGIN, atr * k)
+                print(f"📈 TP adaptif berdasarkan ATR: {tp_price:.2f}")
+            else:
+                if side == "LONG":
+                    tp_price = current_price * (1 + MIN_PROFIT_MARGIN)
+                else:
+                    tp_price = current_price * (1 - MIN_PROFIT_MARGIN)
+                print(f"📈 TP fallback: {tp_price:.2f}")
+
+        place_tp_order(symbol, side, tp_price)
+
         if trailing_stop_callback_rate:
             place_trailing_stop(symbol, side, quantity, trailing_stop_callback_rate)
             print(f"📉 Trailing stop set at {trailing_stop_callback_rate}%")
