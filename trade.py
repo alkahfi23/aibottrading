@@ -170,23 +170,23 @@ def execute_trade(symbol, side, quantity, entry_price, leverage, position_side="
             else:
                 print(f"⚠️ SL dibatalkan karena akan langsung trigger (current: {current_price}, SL: {sl_price})")
 
-            # Estimasi TP adaptif berdasarkan ATR
-            MIN_PROFIT_MARGIN = 0.0015  # minimal
-            atr = calculate_atr(symbol, interval='1m', period=20)
-            if tp_price is None and atr:
-                k = 1.5  # multiplier agresivitas
-            if side == "LONG":
-                tp_price = current_price + max(current_price * MIN_PROFIT_MARGIN, atr * k)
-            else:
-                tp_price = current_price - max(current_price * MIN_PROFIT_MARGIN, atr * k)
-                print(f"📈 TP adaptif berdasarkan ATR: {tp_price:.2f}")
-            elif tp_price is None:
-            # fallback kalau gagal ATR
-            if side == "LONG":
-                tp_price = current_price * (1 + MIN_PROFIT_MARGIN)
-            else:
-                tp_price = current_price * (1 - MIN_PROFIT_MARGIN)
-                print(f"📈 TP fallback: {tp_price:.2f}")
+        # Estimasi TP adaptif berdasarkan ATR
+        MIN_PROFIT_MARGIN = 0.0015  # minimal
+        atr = calculate_atr(symbol, interval='1m', period=20)
+        if tp_price is None and atr:
+            k = 1.5  # multiplier agresivitas
+        if side == "LONG":
+            tp_price = current_price + max(current_price * MIN_PROFIT_MARGIN, atr * k)
+        else:
+            tp_price = current_price - max(current_price * MIN_PROFIT_MARGIN, atr * k)
+            print(f"📈 TP adaptif berdasarkan ATR: {tp_price:.2f}")
+        elif tp_price is None:
+        # fallback kalau gagal ATR
+        if side == "LONG":
+            tp_price = current_price * (1 + MIN_PROFIT_MARGIN)
+        else:
+            tp_price = current_price * (1 - MIN_PROFIT_MARGIN)
+            print(f"📈 TP fallback: {tp_price:.2f}")
                 
         if trailing_stop_callback_rate:
             place_trailing_stop(symbol, side, quantity, trailing_stop_callback_rate)
