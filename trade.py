@@ -12,8 +12,11 @@ def adjust_quantity(symbol, qty):
             step = float([f for f in s['filters'] if f['filterType'] == 'LOT_SIZE'][0]['stepSize'])
             precision = max(0, -int(round(math.log10(step))))
             adjusted_qty = math.floor(qty / step) * step
+            if adjusted_qty < step:
+                adjusted_qty = step  # minimal qty = step size supaya gak nol
             return round(adjusted_qty, precision)
     return qty
+
 
 def set_leverage(symbol, leverage):
     try:
