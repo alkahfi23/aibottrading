@@ -1,5 +1,3 @@
-# worker_bot.py
-
 import os, time, datetime
 import pandas as pd
 import requests
@@ -94,11 +92,12 @@ def enhanced_signal(df):
     if score_short >= 3: return "SHORT"
     return ""
 
-def calculate_position_size(balance, risk_pct, entry, sl, leverage):
+def calculate_position_size_safe(balance, risk_pct, entry, sl, leverage, max_margin_pct=0.85):
     risk_amt = balance * (risk_pct / 100)
     sl_distance_pct = abs(entry - sl) / entry
     if sl_distance_pct == 0: return 0
-    notional = (risk_amt / sl_distance_pct) * leverage
+    max_margin_allowed = balance * max_margin_pct
+    notional = min((risk_amt / sl_distance_pct) * leverage, max_margin_allowed * leverage)
     qty = notional / entry
     return round(qty, 6)
 
@@ -132,7 +131,7 @@ def main_loop():
                     sl = entry - atr * 0.8 if signal == "LONG" else entry + atr * 0.8
                     tp = entry + atr * 3.0 if signal == "LONG" else entry - atr * 3.0
 
-                    pos_size = calculate_position_size(balance, risk_pct, entry, sl, leverage)
+                    pos_size = calculate_position_size_safe(balance, risk_pct, entry, sl, leverage)
                     pos_size = adjust_quantity_to_step(symbol, pos_size)
 
                     if pos_size < MIN_QTY or not is_notional_valid(symbol, pos_size, entry):
