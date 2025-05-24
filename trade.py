@@ -58,19 +58,21 @@ def adjust_quantity(symbol, qty):
         print(f"❌ adjust_quantity error: {e}")
     return 0.0
 
-def execute_trade(symbol, side, quantity, entry_price, leverage, position_side="BOTH", sl_price=None, tp_price=None, trailing_stop_callback_rate=None):
+def execute_trade(symbol, side, quantity, entry_price, leverage, sl_price=None, tp_price=None, trailing_stop_callback_rate=None):
     try:
+        # Set leverage
         client.futures_change_leverage(symbol=symbol, leverage=leverage)
 
+        # Adjust quantity sesuai LOT_SIZE dan minQty
         quantity = adjust_quantity(symbol, quantity)
         if quantity <= 0:
             print("❌ Quantity too small to execute.")
             return False
 
-        # Close opposite position
+        # Tutup posisi lawan jika ada
         close_opposite_position(symbol, side)
 
-        # Market Order Entry
+        # Entry: Market Order
         order = client.futures_create_order(
             symbol=symbol,
             side=SIDE_BUY if side == "LONG" else SIDE_SELL,
@@ -80,7 +82,7 @@ def execute_trade(symbol, side, quantity, entry_price, leverage, position_side="
         )
         print(f"✅ Market order executed: {order['orderId']}")
 
-        # SL / TP (optional)
+        # SL (Stop Loss)
         if sl_price:
             client.futures_create_order(
                 symbol=symbol,
@@ -91,6 +93,8 @@ def execute_trade(symbol, side, quantity, entry_price, leverage, position_side="
                 reduceOnly=True
             )
             print(f"🔒 SL set at {sl_price}")
+
+        # TP (Take Profit)
         if tp_price:
             client.futures_create_order(
                 symbol=symbol,
@@ -102,7 +106,7 @@ def execute_trade(symbol, side, quantity, entry_price, leverage, position_side="
             )
             print(f"🎯 TP set at {tp_price}")
 
-        # Trailing Stop (optional)
+        # Trailing Stop
         if trailing_stop_callback_rate:
             client.futures_create_order(
                 symbol=symbol,
