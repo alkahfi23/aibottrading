@@ -163,16 +163,16 @@ def main_loop():
                     close_opposite_position(symbol, signal)
 
                     result = execute_trade(
-                        symbol=symbol,
-                        side=signal,
-                        quantity=pos_size,
-                        entry_price=entry,
-                        leverage=leverage,
-                        position_side=signal,
-                        sl_price=sl,
-                        tp_price=tp,
-                        trailing_stop_callback_rate=1.0
+                    symbol=symbol,
+                    side=signal,
+                    quantity=pos_size,
+                    entry_price=entry,
+                    leverage=leverage,
+                    sl_price=sl,
+                    tp_price=tp,
+                    trailing_stop_callback_rate=1.0
                     )
+
                     if result:
                         print(f"✅ Order berhasil: {signal} {symbol} Qty: {pos_size}")
                         kirim_notifikasi_order(symbol, signal, leverage, pos_size)
