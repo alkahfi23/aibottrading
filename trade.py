@@ -59,6 +59,20 @@ def adjust_quantity(symbol, qty):
         print(f"❌ adjust_quantity error: {e}")
     return 0.0
 
+def adjust_price(symbol, price):
+    try:
+        info = client.futures_exchange_info()
+        for s in info['symbols']:
+            if s['symbol'] == symbol:
+                for f in s['filters']:
+                    if f['filterType'] == 'PRICE_FILTER':
+                        tick_size = Decimal(f['tickSize'])
+                        d_price = Decimal(str(price)).quantize(tick_size, rounding=ROUND_DOWN)
+                        return float(d_price)
+    except Exception as e:
+        print(f"❌ adjust_price error: {e}")
+    return price
+
 def validate_trend_5m(symbol, signal):
     try:
         klines = client.futures_klines(symbol=symbol, interval='5m', limit=20)
@@ -87,22 +101,26 @@ def cancel_existing_exit_orders(symbol):
         print(f"❌ Gagal membatalkan order TP/SL/Trailing: {e}")
 
 def place_sl_order(symbol, side, sl_price):
+    sl_price = adjust_price(symbol, sl_price)
     client.futures_create_order(
         symbol=symbol,
         side=SIDE_SELL if side == "LONG" else SIDE_BUY,
         type="STOP_MARKET",
-        stopPrice=round(sl_price, 2),
+        stopPrice=sl_price,
         closePosition=True,
     )
+    print(f"🔒 SL order placed at {sl_price}")
 
 def place_tp_order(symbol, side, tp_price):
+    tp_price = adjust_price(symbol, tp_price)
     client.futures_create_order(
         symbol=symbol,
         side=SIDE_SELL if side == "LONG" else SIDE_BUY,
         type="TAKE_PROFIT_MARKET",
-        stopPrice=round(tp_price, 2),
+        stopPrice=tp_price,
         closePosition=True,
     )
+    print(f"📈 TP order placed at {tp_price}")
 
 def place_trailing_stop(symbol, side, quantity, callback_rate):
     client.futures_create_order(
@@ -113,6 +131,7 @@ def place_trailing_stop(symbol, side, quantity, callback_rate):
         callbackRate=callback_rate,
         reduceOnly=True
     )
+    print(f"📉 Trailing stop order placed with callback rate {callback_rate}%")
 
 def calculate_atr(symbol, interval='5m', period=20):
     try:
@@ -130,7 +149,7 @@ def calculate_atr(symbol, interval='5m', period=20):
         print(f"❌ Gagal hitung ATR: {e}")
         return None
 
-def execute_trade(symbol, side, quantity, entry_price, leverage, position_side="BOTH", sl_price=None, tp_price=None, trailing_stop_callback_rate=None):
+def execute_trade(symbol, side, quantity, entry_price=None, leverage=10, position_side="BOTH", sl_price=None, tp_price=None, trailing_stop_callback_rate=None):
     try:
         if not validate_trend_5m(symbol, side):
             print("❌ Trade dibatalkan karena trend 5m bertentangan dengan sinyal.")
@@ -155,58 +174,63 @@ def execute_trade(symbol, side, quantity, entry_price, leverage, position_side="
             quantity=quantity,
             reduceOnly=False
         )
-        print(f"✅ Market order executed: {order['orderId']}")
+        print(f"✅ Market order executed: orderId={order['orderId']}")
 
+        # Ambil harga mark price setelah eksekusi order untuk referensi entry price
         current_price = float(client.futures_mark_price(symbol=symbol)['markPrice'])
+
+        print(f"🔹 Executed Trade Details:")
+        print(f"   Symbol   : {symbol}")
+        print(f"   Side     : {side}")
+        print(f"   Quantity : {quantity}")
+        print(f"   Entry Price (Mark Price) : {current_price}")
+        print(f"   Leverage : {leverage}x")
 
         cancel_existing_exit_orders(symbol)
 
-                ### STOP LOSS ADAPTIF
+        atr = calculate_atr(symbol, interval='5m', period=20)  # ATR untuk SL
+
+        # STOP LOSS
         if sl_price is None:
             if atr:
-                sl_multiplier = 1.2  # bisa diatur sesuai selera
-                if side == "LONG":
-                    sl_price = current_price - atr * sl_multiplier
-                else:
-                    sl_price = current_price + atr * sl_multiplier
-                print(f"🔒 SL adaptif berdasarkan ATR: {sl_price:.2f}")
+                sl_multiplier = 1.2
+                sl_price = (current_price - atr * sl_multiplier) if side == "LONG" else (current_price + atr * sl_multiplier)
+                sl_price = adjust_price(symbol, sl_price)
             else:
-                sl_price = current_price * (1 - 0.005) if side == "LONG" else current_price * (1 + 0.005)
-                print(f"🔒 SL fallback: {sl_price:.2f}")
+                sl_price = (current_price * 0.995) if side == "LONG" else (current_price * 1.005)
+                sl_price = adjust_price(symbol, sl_price)
 
-        # Validasi bahwa SL tidak langsung trigger
+        # Validasi SL agar tidak langsung trigger
         if (side == "LONG" and sl_price < current_price) or (side == "SHORT" and sl_price > current_price):
             place_sl_order(symbol, side, sl_price)
-            print(f"🔒 SL set at {sl_price}")
         else:
             print(f"⚠️ SL dibatalkan karena terlalu dekat (current: {current_price}, SL: {sl_price})")
 
-
         MIN_PROFIT_MARGIN = 0.0015
-        atr = calculate_atr(symbol, interval='1m', period=20)
+        atr_1m = calculate_atr(symbol, interval='1m', period=20)  # ATR untuk TP
 
+        # TAKE PROFIT
         if tp_price is None:
-            if atr:
+            if atr_1m:
                 k = 1.5
-                if side == "LONG":
-                    tp_price = current_price + max(current_price * MIN_PROFIT_MARGIN, atr * k)
-                else:
-                    tp_price = current_price - max(current_price * MIN_PROFIT_MARGIN, atr * k)
-                print(f"📈 TP adaptif berdasarkan ATR: {tp_price:.2f}")
+                tp_price = (current_price + max(current_price * MIN_PROFIT_MARGIN, atr_1m * k)) if side == "LONG" else (current_price - max(current_price * MIN_PROFIT_MARGIN, atr_1m * k))
+                tp_price = adjust_price(symbol, tp_price)
             else:
-                if side == "LONG":
-                    tp_price = current_price * (1 + MIN_PROFIT_MARGIN)
-                else:
-                    tp_price = current_price * (1 - MIN_PROFIT_MARGIN)
-                print(f"📈 TP fallback: {tp_price:.2f}")
+                tp_price = (current_price * (1 + MIN_PROFIT_MARGIN)) if side == "LONG" else (current_price * (1 - MIN_PROFIT_MARGIN))
+                tp_price = adjust_price(symbol, tp_price)
 
         place_tp_order(symbol, side, tp_price)
 
+        # Trailing stop opsional
         if trailing_stop_callback_rate:
             place_trailing_stop(symbol, side, quantity, trailing_stop_callback_rate)
-            print(f"📉 Trailing stop set at {trailing_stop_callback_rate}%")
 
+        print("✅ Trade executed successfully.")
         return True
+
     except Exception as e:
-        print(f"❌ Trade execution failed: {e}")
+        print(f"❌ Error execute_trade: {e}")
         return False
+
+# Contoh penggunaan:
+# execute_trade("BTCUSDT", "LONG", 0.001, leverage=10, trailing_stop_callback_rate=0.3)
