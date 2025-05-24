@@ -9,6 +9,7 @@ from binance.client import Client
 from ta.trend import EMAIndicator, ADXIndicator, MACD
 from ta.momentum import RSIIndicator
 from ta.volatility import BollingerBands, AverageTrueRange
+from datetime import datetime, timezone
 
 from trade import execute_trade, position_exists, close_opposite_position, adjust_quantity
 from notifikasi import kirim_notifikasi_order, kirim_notifikasi_penutupan
@@ -27,7 +28,7 @@ MIN_QTY = 0.0001
 
 # === UTILITAS TAMBAHAN ===
 def get_sleep_duration_for_1m_candle():
-    now = datetime.datetime.utcnow()
+    now = datetime.now(timezone.utc)
     seconds_past_minute = now.second + now.microsecond / 1_000_000
     return max(0.1, 60 - seconds_past_minute)
 
