@@ -1,5 +1,5 @@
 from binance.client import Client
-import binance.enums as enums
+from binance.enums import *
 import os
 import math
 
