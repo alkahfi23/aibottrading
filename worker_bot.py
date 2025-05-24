@@ -1,105 +1,103 @@
 import os
 import time
+from datetime import datetime
+from decimal import Decimal, ROUND_DOWN
 import requests
 from binance.client import Client
-from dotenv import load_dotenv
+from binance.enums import *
 
-load_dotenv()
-
-client = Client(os.getenv("BINANCE_API_KEY"), os.getenv("BINANCE_API_SECRET"))
-
+# === KONFIGURASI ===
+API_KEY = os.getenv("BINANCE_API_KEY")
+API_SECRET = os.getenv("BINANCE_API_SECRET")
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-def send_telegram(msg):
+client = Client(API_KEY, API_SECRET)
+
+# === TOOLS ===
+def send_telegram(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": CHAT_ID,
-        "text": msg,
-        "parse_mode": "Markdown"
-    }
-    requests.post(url, json=payload)
+    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "HTML"}
+    try:
+        requests.post(url, json=payload)
+    except Exception as e:
+        print(f"❌ Gagal kirim Telegram: {e}")
 
-def get_ema(closes, length):
-    return sum(closes[-length:]) / length
+def get_ema(prices, period):
+    if len(prices) < period:
+        return sum(prices) / len(prices)
+    k = 2 / (period + 1)
+    ema = prices[0]
+    for price in prices[1:]:
+        ema = price * k + ema * (1 - k)
+    return ema
 
 def get_fibonacci_levels(high, low):
     diff = high - low
-    levels = {
-        "0.236": high - 0.236 * diff,
-        "0.382": high - 0.382 * diff,
-        "0.5": high - 0.5 * diff,
-        "0.618": high - 0.618 * diff,
-        "0.786": high - 0.786 * diff,
+    return {
+        '0.0': high,
+        '0.236': high - 0.236 * diff,
+        '0.382': high - 0.382 * diff,
+        '0.5': high - 0.5 * diff,
+        '0.618': high - 0.618 * diff,
+        '0.786': high - 0.786 * diff,
+        '1.0': low
     }
-    return levels
 
-def trend_direction(symbol, interval):
+def analyze_symbol(symbol):
     try:
-        klines = client.futures_klines(symbol=symbol, interval=interval, limit=20)
-        closes = [float(k[4]) for k in klines]
-        ema4 = get_ema(closes, 4)
-        ema20 = get_ema(closes, 20)
-        return "UP" if ema4 > ema20 else "DOWN"
-    except:
-        return "UNKNOWN"
+        # Ambil data 1m, 5m, 15m
+        k1 = client.futures_klines(symbol=symbol, interval='1m', limit=50)
+        k5 = client.futures_klines(symbol=symbol, interval='5m', limit=50)
+        k15 = client.futures_klines(symbol=symbol, interval='15m', limit=50)
 
-def detect_signal(symbol="BTCUSDT"):
-    try:
-        klines_1m = client.futures_klines(symbol=symbol, interval="1m", limit=50)
-        closes_1m = [float(k[4]) for k in klines_1m]
-        volumes_1m = [float(k[5]) for k in klines_1m]
+        # Harga penutupan
+        close1 = [float(k[4]) for k in k1]
+        close5 = [float(k[4]) for k in k5]
+        close15 = [float(k[4]) for k in k15]
 
-        volume_now = volumes_1m[-1]
-        volume_avg = sum(volumes_1m[:-1]) / (len(volumes_1m) - 1)
+        # EMA untuk 1m
+        ema4_1m = get_ema(close1[-10:], 4)
+        ema20_1m = get_ema(close1[-20:], 20)
 
-        if volume_now <= 1.5 * volume_avg:
-            print("⏳ Tidak ada volume spike.")
-            return
+        # Validasi multi TF
+        trend1 = 'LONG' if ema4_1m > ema20_1m else 'SHORT'
+        trend5 = 'LONG' if get_ema(close5[-10:], 4) > get_ema(close5[-20:], 20) else 'SHORT'
+        trend15 = 'LONG' if get_ema(close15[-10:], 4) > get_ema(close15[-20:], 20) else 'SHORT'
 
-        ema4 = get_ema(closes_1m, 4)
-        ema20 = get_ema(closes_1m, 20)
-        price_now = closes_1m[-1]
+        # Ambil harga sekarang
+        mark_price = float(client.futures_mark_price(symbol=symbol)['markPrice'])
 
-        trend_1m = trend_direction(symbol, "1m")
-        trend_5m = trend_direction(symbol, "5m")
-        trend_15m = trend_direction(symbol, "15m")
-
-        high = max(closes_1m)
-        low = min(closes_1m)
+        # Fibonacci dari 50 candle terakhir (1m)
+        high = max([float(k[2]) for k in k1])
+        low = min([float(k[3]) for k in k1])
         fib = get_fibonacci_levels(high, low)
 
-        if ema4 > ema20 and trend_1m == trend_5m == trend_15m == "UP":
-            signal = "LONG"
-        elif ema4 < ema20 and trend_1m == trend_5m == trend_15m == "DOWN":
-            signal = "SHORT"
-        else:
-            signal = "⚠️ Mixed Trend - Wait"
+        recommendation = f"Multi-TF: {trend1}/{trend5}/{trend15}, Fib: R={fib['0.236']:.2f}, S={fib['0.786']:.2f}"
 
-        msg = (
-            f"📡 *Sinyal Trading Futures*\n\n"
-            f"📊 Pair: `{symbol}`\n"
-            f"🕒 Volume Spike: `{volume_now:.2f}` > avg `{volume_avg:.2f}`\n"
-            f"📈 EMA(4): `{ema4:.2f}`\n"
-            f"📉 EMA(20): `{ema20:.2f}`\n\n"
-            f"🧠 Trend:\n"
-            f" - 1m: `{trend_1m}`\n"
-            f" - 5m: `{trend_5m}`\n"
-            f" - 15m: `{trend_15m}`\n\n"
-            f"🎯 *Rekomendasi*: *{signal}*\n\n"
-            f"📐 Fibonacci:\n"
-            f" - 0.236: `{fib['0.236']:.2f}`\n"
-            f" - 0.382: `{fib['0.382']:.2f}`\n"
-            f" - 0.5: `{fib['0.5']:.2f}`\n"
-            f" - 0.618: `{fib['0.618']:.2f}`\n"
-            f" - 0.786: `{fib['0.786']:.2f}`"
-        )
+        # Kirim sinyal jika semua timeframe sinkron
+        if trend1 == trend5 == trend15:
+            send_signal_notification(symbol, trend1, mark_price, recommendation)
 
-        send_telegram(msg)
-        print("✅ Sinyal dikirim!")
     except Exception as e:
-        print(f"❌ Gagal deteksi sinyal: {e}")
+        print(f"❌ Gagal analisa {symbol}: {e}")
 
-while True:
-    detect_signal("BTCUSDT")
-    time.sleep(60)  # Cek setiap 1 menit
+def send_signal_notification(symbol, signal, mark_price, recommendation):
+    text = f"""
+📊 <b>Sinyal Futures Terdeteksi!</b>
+Symbol: <b>{symbol}</b>
+Sinyal: <b>{'🚀 LONG' if signal == 'LONG' else '🔻 SHORT'}</b>
+Harga Saat Ini: <b>${mark_price:,.2f}</b>
+Rekomendasi: <i>{recommendation}</i>
+Waktu: <i>{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</i>
+""".strip()
+    send_telegram(text)
+
+# === MAIN LOOP 24/7 ===
+if __name__ == '__main__':
+    symbols = ['BTCUSDT', 'ETHUSDT']
+    print("🚀 Bot berjalan 24/7...")
+    while True:
+        for sym in symbols:
+            analyze_symbol(sym)
+        time.sleep(60)  # cek tiap 1 menit
