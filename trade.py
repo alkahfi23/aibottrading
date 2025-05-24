@@ -78,6 +78,44 @@ def validate_trend_5m(symbol, signal):
         print(f"❌ Gagal validasi trend 5m: {e}")
         return False
 
+def cancel_existing_exit_orders(symbol):
+    try:
+        orders = client.futures_get_open_orders(symbol=symbol)
+        for order in orders:
+            if order['type'] in ['STOP_MARKET', 'TAKE_PROFIT_MARKET', 'TRAILING_STOP_MARKET']:
+                client.futures_cancel_order(symbol=symbol, orderId=order['orderId'])
+                print(f"🗑️ Cancelled {order['type']} order ID {order['orderId']}")
+    except Exception as e:
+        print(f"❌ Gagal membatalkan order TP/SL/Trailing: {e}")
+
+def place_sl_order(symbol, side, sl_price):
+    client.futures_create_order(
+        symbol=symbol,
+        side=SIDE_SELL if side == "LONG" else SIDE_BUY,
+        type="STOP_MARKET",
+        stopPrice=round(sl_price, 2),
+        closePosition=True,
+    )
+
+def place_tp_order(symbol, side, tp_price):
+    client.futures_create_order(
+        symbol=symbol,
+        side=SIDE_SELL if side == "LONG" else SIDE_BUY,
+        type="TAKE_PROFIT_MARKET",
+        stopPrice=round(tp_price, 2),
+        closePosition=True,
+    )
+
+def place_trailing_stop(symbol, side, quantity, callback_rate):
+    client.futures_create_order(
+        symbol=symbol,
+        side=SIDE_SELL if side == "LONG" else SIDE_BUY,
+        type="TRAILING_STOP_MARKET",
+        quantity=quantity,
+        callbackRate=callback_rate,
+        reduceOnly=True
+    )
+
 def execute_trade(symbol, side, quantity, entry_price, leverage, position_side="BOTH", sl_price=None, tp_price=None, trailing_stop_callback_rate=None):
     try:
         if not validate_trend_5m(symbol, side):
@@ -107,41 +145,25 @@ def execute_trade(symbol, side, quantity, entry_price, leverage, position_side="
 
         current_price = float(client.futures_mark_price(symbol=symbol)['markPrice'])
 
+        # Cancel existing exit orders (SL/TP/Trailing) before setting new ones
+        cancel_existing_exit_orders(symbol)
+
         if sl_price:
             if (side == "LONG" and sl_price < current_price) or (side == "SHORT" and sl_price > current_price):
-                client.futures_create_order(
-                    symbol=symbol,
-                    side=SIDE_SELL if side == "LONG" else SIDE_BUY,
-                    type="STOP_MARKET",
-                    stopPrice=round(sl_price, 2),
-                    closePosition=True,
-                )
+                place_sl_order(symbol, side, sl_price)
                 print(f"🔒 SL set at {sl_price}")
             else:
                 print(f"⚠️ SL dibatalkan karena akan langsung trigger (current: {current_price}, SL: {sl_price})")
 
         if tp_price:
             if (side == "LONG" and tp_price > current_price) or (side == "SHORT" and tp_price < current_price):
-                client.futures_create_order(
-                    symbol=symbol,
-                    side=SIDE_SELL if side == "LONG" else SIDE_BUY,
-                    type="TAKE_PROFIT_MARKET",
-                    stopPrice=round(tp_price, 2),
-                    closePosition=True,
-                )
+                place_tp_order(symbol, side, tp_price)
                 print(f"🎯 TP set at {tp_price}")
             else:
                 print(f"⚠️ TP dibatalkan karena akan langsung trigger (current: {current_price}, TP: {tp_price})")
 
         if trailing_stop_callback_rate:
-            client.futures_create_order(
-                symbol=symbol,
-                side=SIDE_SELL if side == "LONG" else SIDE_BUY,
-                type="TRAILING_STOP_MARKET",
-                quantity=quantity,
-                callbackRate=trailing_stop_callback_rate,
-                reduceOnly=True
-            )
+            place_trailing_stop(symbol, side, quantity, trailing_stop_callback_rate)
             print(f"📉 Trailing stop set at {trailing_stop_callback_rate}%")
 
         return True
