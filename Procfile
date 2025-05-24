@@ -1,1 +1,1 @@
-worker: python3 worker_bot.py
+worker: python3 tele.py
