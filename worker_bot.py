@@ -1,6 +1,7 @@
 import os
 import time
 import requests
+import ta
 from binance.client import Client
 from binance.enums import *
 import numpy as np
