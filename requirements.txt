@@ -1,6 +1,6 @@
-binance==1.0.15
-pandas==1.5.3
-requests==2.31.0
-ta==0.10.2
-twilio==8.13.1
-python-dotenv==1.0.0
+python-binance
+pandas
+requests
+ta
+twilio
+python-dotenv
