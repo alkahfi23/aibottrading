@@ -11,25 +11,20 @@ def get_futures_balance(asset='USDT'):
             if b['asset'] == asset:
                 return float(b['balance'])
     except BinanceAPIException as e:
-        print(f"Error fetching balance: {e}")
+        print(f"❌ Error fetching balance: {e}")
     return 0.0
 
 def set_leverage(symbol, leverage):
     try:
-        leverage = int(leverage)
-        if leverage < 1:
-            leverage = 1
-        if leverage > 125:  # Binance max leverage for most coins is 125
-            leverage = 125
+        leverage = max(1, min(int(leverage), 125))
         client.futures_change_leverage(symbol=symbol, leverage=leverage)
-        print(f"Leverage for {symbol} set to {leverage}")
+        print(f"✅ Leverage for {symbol} set to {leverage}")
         return True
     except BinanceAPIException as e:
-        print(f"Failed to set leverage: {e}")
+        print(f"❌ Failed to set leverage: {e}")
         return False
 
 def get_dynamic_leverage(balance):
-    # Simple logic, max 10x for low balance, max 3x for high balance
     if balance < 100:
         return 10
     elif balance < 500:
@@ -38,7 +33,6 @@ def get_dynamic_leverage(balance):
         return 3
 
 def get_dynamic_risk_pct(balance):
-    # Risk % based on balance tiers
     if balance < 100:
         return 1
     elif balance < 500:
@@ -59,7 +53,7 @@ def get_position_info(symbol):
                     'symbol': symbol
                 }
     except BinanceAPIException as e:
-        print(f"Error getting position info: {e}")
+        print(f"❌ Error getting position info: {e}")
     return None
 
 def calculate_profit_pct(entry_price, mark_price, position_side):
@@ -69,5 +63,37 @@ def calculate_profit_pct(entry_price, mark_price, position_side):
         elif position_side == "SHORT":
             return ((entry_price - mark_price) / entry_price) * 100
     except Exception as e:
-        print(f"Error calculating profit %: {e}")
+        print(f"❌ Error calculating profit %: {e}")
     return 0.0
+
+def get_precision(symbol):
+    try:
+        info = client.futures_exchange_info()
+        for s in info['symbols']:
+            if s['symbol'] == symbol:
+                for f in s['filters']:
+                    if f['filterType'] == 'LOT_SIZE':
+                        return int(round(-1 * (f['stepSize'].find('1') - 1)))
+    except Exception as e:
+        print(f"❌ Error getting precision for {symbol}: {e}")
+    return 3  # default
+
+def calculate_position_size(symbol, balance, price, leverage, risk_pct):
+    try:
+        usd_risk = balance * (risk_pct / 100)
+        position_value = usd_risk * leverage
+        qty = position_value / price
+        precision = get_precision(symbol)
+        qty = round(qty, precision)
+        return qty
+    except Exception as e:
+        print(f"❌ Error calculating position size: {e}")
+        return 0.0
+
+def is_min_notional_valid(symbol, qty, price):
+    try:
+        min_notional = 5.0  # Binance min notional futures ~ $5
+        return qty * price >= min_notional
+    except Exception as e:
+        print(f"❌ Error checking notional: {e}")
+        return False
