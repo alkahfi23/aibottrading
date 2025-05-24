@@ -1,8 +1,6 @@
 # worker_bot.py
 
-import os
-import time
-import datetime
+import os, time, datetime
 import pandas as pd
 import requests
 from binance.client import Client
@@ -18,19 +16,12 @@ from utils import (
     get_dynamic_risk_pct, get_position_info, calculate_profit_pct
 )
 
-# === KONFIGURASI ===
 client = Client(os.getenv("BINANCE_API_KEY"), os.getenv("BINANCE_API_SECRET"))
-BASE_URL = "https://api.binance.com"
 SYMBOLS = ["BTCUSDT"]
 INTERVAL = "1m"
 LIMIT = 100
 MIN_QTY = 0.0001
-
-# === UTILITAS TAMBAHAN ===
-def get_sleep_duration_for_1m_candle():
-    now = datetime.now(timezone.utc)
-    seconds_past_minute = now.second + now.microsecond / 1_000_000
-    return max(0.1, 60 - seconds_past_minute)
+BASE_URL = "https://api.binance.com"
 
 def get_symbol_filters(symbol):
     info = client.futures_exchange_info()
@@ -41,16 +32,20 @@ def get_symbol_filters(symbol):
 
 def adjust_quantity_to_step(symbol, qty):
     filters = get_symbol_filters(symbol)
-    step_size = float(filters.get("LOT_SIZE", {}).get("stepSize", 0.0001))
-    precision = max(0, str(step_size)[::-1].find('.'))
-    return round(qty - (qty % step_size), precision)
+    step = float(filters.get("LOT_SIZE", {}).get("stepSize", 0.0001))
+    precision = max(0, str(step)[::-1].find('.'))
+    return round(qty - (qty % step), precision)
 
 def is_notional_valid(symbol, qty, price):
     filters = get_symbol_filters(symbol)
     min_notional = float(filters.get("MIN_NOTIONAL", {}).get("notional", 5.0))
     return qty * price >= min_notional
 
-# === DATA DAN INDIKATOR ===
+def get_sleep_duration_for_1m_candle():
+    now = datetime.now(timezone.utc)
+    seconds_past_minute = now.second + now.microsecond / 1_000_000
+    return max(0.1, 60 - seconds_past_minute)
+
 def get_klines(symbol, interval, limit):
     url = f"{BASE_URL}/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
     res = requests.get(url)
@@ -77,7 +72,6 @@ def calculate_indicators(df):
     df['atr'] = atr.average_true_range()
     return df
 
-# === SINYAL STRATEGI ===
 def enhanced_signal(df):
     latest, prev = df.iloc[-1], df.iloc[-2]
     score_long = sum([
@@ -100,7 +94,6 @@ def enhanced_signal(df):
     if score_short >= 3: return "SHORT"
     return ""
 
-# === PERHITUNGAN RISIKO DAN UKURAN POSISI ===
 def calculate_position_size(balance, risk_pct, entry, sl, leverage):
     risk_amt = balance * (risk_pct / 100)
     sl_distance_pct = abs(entry - sl) / entry
@@ -114,18 +107,15 @@ def margin_warning(balance, pos_size, entry, leverage):
     if margin_used > balance:
         return True, "❌ Margin tidak cukup untuk membuka posisi ini."
     elif margin_used > balance * 0.9:
-        return True, "⚠️ Margin call risk tinggi!"
+        return True, "⚠️ Risiko margin call tinggi!"
     return False, ""
 
-# === MAIN LOOP ===
 def main_loop():
     while True:
         try:
             for symbol in SYMBOLS:
                 df = get_klines(symbol, INTERVAL, LIMIT)
-                if df.empty or df.shape[0] < 20:
-                    print(f"⚠️ Data tidak cukup untuk {symbol}")
-                    continue
+                if df.empty or df.shape[0] < 20: continue
 
                 df = calculate_indicators(df)
                 signal = enhanced_signal(df)
@@ -138,26 +128,19 @@ def main_loop():
                 set_leverage(symbol, leverage)
 
                 if signal and not position_exists(symbol, signal):
-                    sl = entry - latest['atr'] * 1.5 if signal == "LONG" else entry + latest['atr'] * 1.5
-                    tp = entry + latest['atr'] * 2.5 if signal == "LONG" else entry - latest['atr'] * 2.5
+                    atr = latest['atr']
+                    sl = entry - atr * 0.8 if signal == "LONG" else entry + atr * 0.8
+                    tp = entry + atr * 3.0 if signal == "LONG" else entry - atr * 3.0
+
                     pos_size = calculate_position_size(balance, risk_pct, entry, sl, leverage)
-
-                    margin_used = (pos_size * entry) / leverage
-                    max_margin = balance * 0.8
-                    if margin_used > max_margin:
-                        pos_size = (max_margin * leverage) / entry
-
                     pos_size = adjust_quantity_to_step(symbol, pos_size)
-                    if pos_size < MIN_QTY:
-                        print(f"⛔ Ukuran posisi terlalu kecil untuk {symbol} (adjusted: {pos_size})")
+
+                    if pos_size < MIN_QTY or not is_notional_valid(symbol, pos_size, entry):
+                        print(f"⛔ Posisi terlalu kecil: {pos_size}")
                         continue
 
-                    if not is_notional_valid(symbol, pos_size, entry):
-                        print(f"⛔ Notional terlalu kecil: {pos_size * entry:.2f} < min")
-                        continue
-
-                    is_margin_risk, note = margin_warning(balance, pos_size, entry, leverage)
-                    if is_margin_risk:
+                    risk, note = margin_warning(balance, pos_size, entry, leverage)
+                    if risk:
                         print(note)
                         continue
 
@@ -171,35 +154,23 @@ def main_loop():
                         leverage=leverage,
                         sl_price=sl,
                         tp_price=tp,
-                        trailing_stop_callback_rate=1.0
+                        trailing_stop_callback_rate=0.8
                     )
 
                     if result:
-                        print(f"✅ Order berhasil: {signal} {symbol} Qty: {pos_size}")
                         kirim_notifikasi_order(symbol, signal, leverage, pos_size)
+                        print(f"✅ Order: {signal} {symbol} Qty: {pos_size}")
                     else:
-                        print(f"❌ Order gagal untuk {symbol}")
+                        print(f"❌ Gagal order {symbol}")
                 else:
-                    pos_info = get_position_info(symbol)
-                    if pos_info and pos_info['unRealizedProfit'] != 0:
-                        profit_pct = calculate_profit_pct(
-                            pos_info['entryPrice'],
-                            pos_info['markPrice'],
-                            "LONG" if pos_info['positionAmt'] > 0 else "SHORT"
-                        )
-                        if abs(profit_pct) >= 0.3:
-                            kirim_notifikasi_penutupan(symbol, pos_info['unRealizedProfit'], profit_pct)
+                    print(f"ℹ️ Tidak ada sinyal atau posisi terbuka: {symbol}")
 
-                    print(f"ℹ️ {symbol}: Tidak ada sinyal baru atau posisi sudah terbuka.")
-
-            sleep_dur = get_sleep_duration_for_1m_candle()
-            print(f"🕒 Sleeping for {sleep_dur:.2f} seconds...")
-            time.sleep(sleep_dur)
+            time.sleep(get_sleep_duration_for_1m_candle())
 
         except Exception as e:
-            print(f"[ERROR MAIN LOOP] {e}")
+            print(f"[ERROR LOOP] {e}")
             with open("errors.log", "a") as f:
-                f.write(f"[{datetime.datetime.utcnow()}] ERROR: {str(e)}\n")
+                f.write(f"[{datetime.utcnow()}] ERROR: {str(e)}\n")
             time.sleep(30)
 
 if __name__ == "__main__":
