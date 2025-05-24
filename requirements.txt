@@ -2,3 +2,4 @@ python-binance
 requests
 python-dotenv
 numpy
+ta
