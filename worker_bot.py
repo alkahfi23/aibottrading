@@ -1,10 +1,12 @@
 import os
 import time
 import requests
-import ta
+import numpy as np
 from binance.client import Client
 from binance.enums import *
-import numpy as np
+from ta.momentum import RSIIndicator
+from ta.trend import MACD, ADXIndicator
+from decimal import Decimal
 
 # === SETUP ===
 API_KEY = os.getenv("BINANCE_API_KEY")
