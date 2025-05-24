@@ -8,7 +8,7 @@ from ta.momentum import RSIIndicator
 from ta.trend import MACD, ADXIndicator
 from decimal import Decimal
 
-# === SETUP API & VARIABEL ===
+# === SETUP ===
 API_KEY = os.getenv("BINANCE_API_KEY")
 API_SECRET = os.getenv("BINANCE_API_SECRET")
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -17,7 +17,7 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 client = Client(API_KEY, API_SECRET)
 last_signal = {}
 
-# === FUNGSI TOOLS ===
+# === TOOLS ===
 def send_to_telegram(message):
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -26,7 +26,7 @@ def send_to_telegram(message):
         if response.status_code == 200:
             print("✅ Telegram terkirim.")
         else:
-            print(f"❌ Gagal kirim: {response.text}")
+            print(f"❌ Gagal Telegram: {response.text}")
     except Exception as e:
         print(f"❌ Error Telegram: {e}")
 
@@ -65,6 +65,15 @@ def calculate_fibonacci_support_resistance(prices):
     }
     return levels
 
+def get_ema_direction(symbol, interval="1h", limit=20):
+    klines = get_klines(symbol, interval, limit)
+    if not klines:
+        return "NONE"
+    closes = [float(k[4]) for k in klines]
+    ema4 = calculate_ema(closes, 4)
+    ema20 = calculate_ema(closes, 20)
+    return "LONG" if ema4 > ema20 else "SHORT"
+
 # === ANALISIS SINYAL ===
 def analyze_signal(symbol):
     timeframes = {"1m": 20, "5m": 20, "15m": 20}
@@ -91,18 +100,21 @@ def analyze_signal(symbol):
             elif bb_upper and last_close > bb_upper:
                 bb_signal = "SHORT"
 
+    # Konfirmasi 1 jam
+    confirm_1h = get_ema_direction(symbol, interval="1h")
+
     directions = list(trend_confirm.values())
-    if directions.count("LONG") >= 2 and bb_signal == "LONG":
-        return "LONG", last_close, fibo, bb_signal
-    elif directions.count("SHORT") >= 2 and bb_signal == "SHORT":
-        return "SHORT", last_close, fibo, bb_signal
+    if directions.count("LONG") >= 2 and bb_signal == "LONG" and confirm_1h == "LONG":
+        return "LONG", last_close, fibo, bb_signal, confirm_1h
+    elif directions.count("SHORT") >= 2 and bb_signal == "SHORT" and confirm_1h == "SHORT":
+        return "SHORT", last_close, fibo, bb_signal, confirm_1h
     else:
-        return "NONE", last_close, fibo, bb_signal
+        return "NONE", last_close, fibo, bb_signal, confirm_1h
 
 # === NOTIFIKASI ===
 def notify(symbol):
     global last_signal
-    signal, price, fibo, bb_sig = analyze_signal(symbol)
+    signal, price, fibo, bb_sig, conf_1h = analyze_signal(symbol)
     if signal == "NONE":
         print("⏸️ Tidak ada sinyal.")
         return
@@ -120,6 +132,7 @@ def notify(symbol):
         f"🧭 Sinyal: {signal}\n"
         f"💵 Harga Saat Ini: {price:.2f}\n"
         f"📊 Bollinger Band Sinyal: {bb_sig}\n"
+        f"🕐 Konfirmasi 1H: {conf_1h}\n"
         f"📐 Fibonacci Support/Resistance:\n{fibo_str}"
     )
     send_to_telegram(message)
@@ -133,3 +146,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
