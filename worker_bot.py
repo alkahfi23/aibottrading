@@ -9,7 +9,7 @@ from ta.trend import EMAIndicator, ADXIndicator, MACD
 from ta.momentum import RSIIndicator
 from ta.volatility import BollingerBands, AverageTrueRange
 
-from trade import execute_trade, position_exists, close_opposite_position, adjust_quantity
+from trade import execute_trade, position_exists, close_opposite_position, adjust_quantity, calculate_atr
 from notifikasi import kirim_notifikasi_order, kirim_notifikasi_penutupan
 from utils import (
     get_futures_balance, set_leverage, get_dynamic_leverage,
