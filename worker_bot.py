@@ -81,11 +81,17 @@ def enhanced_signal(df):
 # === POSITION SIZE & RISK ===
 
 def calculate_position_size(balance, risk_pct, entry, sl, leverage):
+    """
+    Hitung posisi berdasarkan nominal risiko dan ATR dalam bentuk persentase terhadap harga entry.
+    Lebih aman dan cocok untuk modal kecil.
+    """
     risk_amt = balance * (risk_pct / 100)
-    sl_distance = abs(entry - sl)
-    if sl_distance == 0: return 0
-    raw_size = (risk_amt / sl_distance) * leverage
-    return round(raw_size, 6)
+    sl_distance_pct = abs(entry - sl) / entry
+    if sl_distance_pct == 0:
+        return 0
+    notional = (risk_amt / sl_distance_pct) * leverage
+    qty = notional / entry
+    return round(qty, 6)
 
 def margin_warning(balance, pos_size, entry, leverage):
     margin_used = (pos_size * entry) / leverage
@@ -134,7 +140,12 @@ def main_loop():
                     sl = entry - latest['atr'] * 1.5 if signal == "LONG" else entry + latest['atr'] * 1.5
                     tp = entry + latest['atr'] * 2.5 if signal == "LONG" else entry - latest['atr'] * 2.5
                     pos_size = calculate_position_size(balance, risk_pct, entry, sl, leverage)
-                    pos_size = adjust_quantity(symbol, pos_size)
+                    # Batasi penggunaan margin maksimal 80%
+                    margin_used = (pos_size * entry) / leverage
+                    max_margin = balance * 0.8
+                    if margin_used > max_margin:
+                        pos_size = (max_margin * leverage) / entry
+                        pos_size = adjust_quantity(symbol, pos_size)
 
                     if pos_size < MIN_QTY:
                         print(f"⛔ Ukuran posisi terlalu kecil untuk {symbol} (adjusted: {pos_size})")
