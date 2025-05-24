@@ -60,65 +60,62 @@ def adjust_quantity(symbol, qty):
 
 def execute_trade(symbol, side, quantity, entry_price, leverage, sl_price=None, tp_price=None, trailing_stop_callback_rate=None):
     try:
-        # Set leverage
+        # Atur leverage
         client.futures_change_leverage(symbol=symbol, leverage=leverage)
 
-        # Adjust quantity sesuai LOT_SIZE dan minQty
+        # Sesuaikan kuantitas agar valid
         quantity = adjust_quantity(symbol, quantity)
         if quantity <= 0:
             print("❌ Quantity too small to execute.")
             return False
 
-        # Tutup posisi lawan jika ada
+        # Tutup posisi lawan (jika ada)
         close_opposite_position(symbol, side)
 
-        # Entry: Market Order
+        # Eksekusi market order utama
         order = client.futures_create_order(
             symbol=symbol,
             side=SIDE_BUY if side == "LONG" else SIDE_SELL,
             type=ORDER_TYPE_MARKET,
-            quantity=quantity,
-            reduceOnly=False
+            quantity=quantity
         )
         print(f"✅ Market order executed: {order['orderId']}")
 
-        # SL (Stop Loss)
+        # Set Stop Loss (tanpa reduceOnly)
         if sl_price:
             client.futures_create_order(
                 symbol=symbol,
                 side=SIDE_SELL if side == "LONG" else SIDE_BUY,
                 type="STOP_MARKET",
                 stopPrice=round(sl_price, 2),
-                closePosition=True,
-                reduceOnly=True
+                closePosition=True
             )
             print(f"🔒 SL set at {sl_price}")
 
-        # TP (Take Profit)
+        # Set Take Profit (tanpa reduceOnly)
         if tp_price:
             client.futures_create_order(
                 symbol=symbol,
                 side=SIDE_SELL if side == "LONG" else SIDE_BUY,
                 type="TAKE_PROFIT_MARKET",
                 stopPrice=round(tp_price, 2),
-                closePosition=True,
-                reduceOnly=True
+                closePosition=True
             )
             print(f"🎯 TP set at {tp_price}")
 
-        # Trailing Stop
+        # Set Trailing Stop (jangan pakai reduceOnly)
         if trailing_stop_callback_rate:
             client.futures_create_order(
                 symbol=symbol,
                 side=SIDE_SELL if side == "LONG" else SIDE_BUY,
                 type="TRAILING_STOP_MARKET",
                 quantity=quantity,
-                callbackRate=trailing_stop_callback_rate,
-                reduceOnly=True
+                callbackRate=trailing_stop_callback_rate
             )
             print(f"📉 Trailing stop set at {trailing_stop_callback_rate}%")
 
         return True
+
     except Exception as e:
         print(f"❌ Trade execution failed: {e}")
         return False
