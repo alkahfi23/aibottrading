@@ -180,7 +180,7 @@ def execute_trade(symbol, side, quantity, entry_price, leverage, position_side="
         else:
             tp_price = current_price - max(current_price * MIN_PROFIT_MARGIN, atr * k)
             print(f"📈 TP adaptif berdasarkan ATR: {tp_price:.2f}")
-        elif tp_price is None:
+            elif tp_price is None:
         # fallback kalau gagal ATR
         if side == "LONG":
             tp_price = current_price * (1 + MIN_PROFIT_MARGIN)
