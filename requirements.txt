@@ -1,6 +1,3 @@
 python-binance
-pandas
 requests
-ta
-twilio
 python-dotenv
