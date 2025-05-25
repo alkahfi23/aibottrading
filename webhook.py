@@ -80,7 +80,7 @@ def analyze_signal(symbol):
             levels = fibonacci_levels(closes)
 
     signal = "LONG" if trend["LONG"] >= 2 else "SHORT" if trend["SHORT"] >= 2 else "NONE"
-    return signal, price_now, levels
+    return signal, price_now, levels, trend
 
 def get_active_futures_pairs():
     try:
@@ -101,22 +101,39 @@ def webhook():
     chat_id = data["message"]["chat"]["id"]
     text = data["message"].get("text", "").strip().upper()
 
-    # ✅ Tambahkan pengecekan command PAIRS di sini
+    # ✅ Command: PAIRS
     if text == "PAIRS":
         pairs = get_active_futures_pairs()
         if not pairs:
             send_telegram(chat_id, "⚠️ Gagal mengambil daftar pair dari Binance.")
         else:
             message = "✅ Daftar Pair Binance Futures Aktif (PERPETUAL):\n"
-            message += ", ".join(pairs[:50]) + "..."  # batasi agar tak terlalu panjang
+            message += ", ".join(pairs[:50]) + "..."
             send_telegram(chat_id, message)
         return "ok", 200
 
-    # ⛔ Jika bukan command, validasi dulu input minimal 6 huruf dan alfanumerik
+    # ✅ Command: PAIRSVOL
+    if text == "PAIRSVOL":
+        try:
+            tickers = client.futures_ticker()
+            perpetuals = [t for t in tickers if t["contractType"] == "PERPETUAL"]
+            top_volumes = sorted(perpetuals, key=lambda x: float(x["quoteVolume"]), reverse=True)[:10]
+            message = "🔥 Top 10 Pair Binance Futures (Volume 24h):\n"
+            for t in top_volumes:
+                pair = t["symbol"]
+                vol = float(t["quoteVolume"])
+                message += f"• {pair}: {vol:,.0f} USDT\n"
+            send_telegram(chat_id, message)
+        except Exception as e:
+            print("❌ ERROR PAIRSVOL:", e)
+            send_telegram(chat_id, "⚠️ Gagal mengambil data volume.")
+        return "ok", 200
+
+    # ⛔ Validasi input
     if not text.isalnum() or len(text) < 6:
         return "ok", 200
 
-    # 🔁 Rate limiter
+    # ⏳ Rate limiter
     now = time.time()
     if now - last_request_time[chat_id] < RATE_LIMIT_SECONDS:
         send_telegram(chat_id, "⏳ Tunggu sebentar ya, coba lagi 1 menit lagi.")
@@ -131,17 +148,28 @@ def webhook():
             send_telegram(chat_id, f"⚠️ Symbol `{symbol}` tidak ditemukan di Binance Futures.")
             return
         try:
-            signal, price, fibo = analyze_signal(symbol)
+            signal, price, fibo, trend = analyze_signal(symbol)
             if signal == "NONE":
                 send_telegram(chat_id, f"⚠️ Belum ada sinyal valid untuk {symbol} saat ini.")
             else:
-                fibo_str = "\n".join([f"🔹 {k}: {v:.2f}" for k, v in fibo.items()])
+                fibo_sorted = sorted(fibo.items(), key=lambda x: x[1])
+                supports = [f"{k}: {v:.2f}" for k, v in fibo_sorted if v < price]
+                resistances = [f"{k}: {v:.2f}" for k, v in fibo_sorted if v > price]
+
+                entry = "Buy on breakout & retest resistance" if signal == "LONG" else "Sell on breakdown & retest support"
+                confidence_score = max(trend["LONG"], trend["SHORT"]) * 25  # Maks 100
+
+                fibo_str = "\n".join([f"🔹 {k}: {v:.2f}" for k, v in fibo_sorted])
                 message = (
                     f"📊 Rekomendasi Trading Futures\n"
                     f"📍 Pair: {symbol}\n"
                     f"🧭 Sinyal: {signal}\n"
                     f"💰 Harga Sekarang: {price:.2f}\n"
-                    f"📐 Fibonacci Levels:\n{fibo_str}"
+                    f"🎯 Rekomendasi Entry: {entry}\n"
+                    f"✅ Skor Kepercayaan: {confidence_score}%\n\n"
+                    f"📐 Fibonacci Levels:\n{fibo_str}\n\n"
+                    f"🔻 Support:\n" + ("\n".join(supports) if supports else "Tidak ada di bawah harga") + "\n\n"
+                    f"🔺 Resistance:\n" + ("\n".join(resistances) if resistances else "Tidak ada di atas harga")
                 )
                 send_telegram(chat_id, message)
         except Exception as e:
