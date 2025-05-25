@@ -6,6 +6,9 @@ from flask import Flask, request
 from binance.client import Client
 from collections import defaultdict
 
+last_request_time = defaultdict(float)  # key: chat_id, value: timestamp
+RATE_LIMIT_SECONDS = 60  # 1 menit
+
 app = Flask(__name__)
 
 # === ENV ===
@@ -89,20 +92,19 @@ def webhook():
         return "ok", 200
 
     chat_id = data["message"]["chat"]["id"]
-    user_id = data["message"]["from"]["id"]
     text = data["message"].get("text", "").strip().upper()
 
     if not text.isalnum() or len(text) < 6:
         return "ok", 200
         
-    # Batasi 1 request per 60 detik per user
-    now = time.time()
-    if now - last_request_time[user_id] < RATE_LIMIT_SECONDS:
-        send_telegram(chat_id, "⏳ Tunggu sebentar ya, kamu baru kirim permintaan. Coba lagi 1 menit lagi.")
-        return "ok", 200
-    last_request_time[user_id] = now
-
     symbol = text
+    # Batasi 1 request per 60 detik per user
+    # Validasi request per chat_id (bukan per user)
+    now = time.time()
+    if now - last_request_time[chat_id] < RATE_LIMIT_SECONDS:
+        send_telegram(chat_id, "⏳ Tunggu sebentar ya, grup ini baru saja kirim permintaan. Coba lagi 1 menit lagi.")
+    return "ok", 200
+    last_request_time[chat_id] = now
 
     if not is_valid_futures_symbol(symbol):
         send_telegram(chat_id, f"⚠️ Symbol `{symbol}` tidak ditemukan di Binance Futures.")
