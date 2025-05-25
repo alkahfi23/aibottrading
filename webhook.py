@@ -4,7 +4,9 @@ import numpy as np
 import time
 import matplotlib.pyplot as plt
 import io
-from flask import Flask, request, send_file
+import pandas as pd
+import mplfinance as mpf
+from flask import Flask, request
 from binance.client import Client
 from collections import defaultdict
 from threading import Thread
@@ -124,24 +126,37 @@ def detect_support_resistance():
             resistance.append((symbol, price, fibo["0.236"]))
     return support, resistance
 
-def plot_fibonacci_chart(symbol):
+# Tambahan fungsi untuk candlestick + fibonacci chart
+def plot_candlestick_fibonacci_chart(symbol):
     klines = get_klines(symbol, "1h", 100)
-    closes = [float(k[4]) for k in klines]
-    timestamps = [k[0] for k in klines]
-    fibo = fibonacci_levels(closes)
+    if not klines:
+        return None
+    data = []
+    for k in klines:
+        timestamp = pd.to_datetime(k[0], unit='ms')
+        data.append([timestamp, float(k[1]), float(k[2]), float(k[3]), float(k[4])])
+    df = pd.DataFrame(data, columns=["Date", "Open", "High", "Low", "Close"])
+    df.set_index("Date", inplace=True)
 
-    plt.figure(figsize=(10, 5))
-    plt.plot(closes, label="Close Price", color="blue")
-    for level, price in fibo.items():
-        plt.axhline(y=price, linestyle="--", label=f"Fib {level} = {price:.2f}")
-    plt.title(f"{symbol} - Fibonacci Support/Resistance")
-    plt.legend()
-    plt.tight_layout()
+    fibo = fibonacci_levels(df["Close"].values)
+    hlines = dict(
+        hlines=[price for price in fibo.values()],
+        colors=["g", "b", "r", "y"],
+        linestyle='--',
+        linewidths=1,
+        alpha=0.7,
+        label=[f"Fib {level}" for level in fibo.keys()]
+    )
 
+    fig, axlist = mpf.plot(df, type='candle', style='charles',
+                           hlines=hlines,
+                           returnfig=True,
+                           title=f"{symbol} 1h Candlestick + Fibonacci",
+                           figsize=(10,6))
     buf = io.BytesIO()
-    plt.savefig(buf, format="png")
+    fig.savefig(buf, format="png")
     buf.seek(0)
-    plt.close()
+    plt.close(fig)
     return buf
 
 # --- Webhook ---
@@ -188,8 +203,11 @@ def webhook():
         if not is_valid_futures_symbol(symbol):
             send_telegram(chat_id, f"⚠️ Symbol `{symbol}` tidak ditemukan.")
         else:
-            img = plot_fibonacci_chart(symbol)
-            send_telegram_photo(chat_id, img, caption=f"📊 Chart {symbol} + Fibonacci")
+            img = plot_candlestick_fibonacci_chart(symbol)
+            if img is None:
+                send_telegram(chat_id, "⚠️ Gagal mengambil data chart.")
+            else:
+                send_telegram_photo(chat_id, img, caption=f"📊 Chart {symbol} + Fibonacci Support/Resistance")
         return "ok", 200
 
     # Validasi simbol
@@ -209,28 +227,23 @@ def webhook():
         if not is_valid_futures_symbol(symbol):
             send_telegram(chat_id, f"⚠️ Symbol `{symbol}` tidak ditemukan.")
             return
-        try:
-            signal, price, fibo, confidence = analyze_signal(symbol)
-            if signal == "NONE":
-                send_telegram(chat_id, f"⚠️ Belum ada sinyal valid untuk {symbol}.")
-            else:
-                fibo_str = "\n".join([f"🔹 {k}: {v:.2f}" for k, v in fibo.items()])
-                msg = (
-                    f"📊 Sinyal Trading\n"
-                    f"📍 Pair: {symbol}\n"
-                    f"🧭 Sinyal: {signal}\n"
-                    f"💰 Harga Sekarang: {price:.2f}\n"
-                    f"📈 Kepercayaan: {confidence * 100:.1f}%\n"
-                    f"📐 Fibonacci:\n{fibo_str}"
-                )
-                send_telegram(chat_id, msg)
-        except Exception as e:
-            print("❌ ERROR:", e)
-            send_telegram(chat_id, "❌ Terjadi kesalahan saat memproses sinyal.")
+        signal, price_now, levels, confidence = analyze_signal(symbol)
+        if signal == "NONE":
+            msg = f"⚠️ Tidak ada sinyal jelas untuk {symbol}."
+        else:
+            msg = (
+                f"📈 Sinyal {signal} untuk {symbol}\n"
+                f"Harga Saat Ini: {price_now:.2f}\n"
+                f"Confidence: {confidence*100:.1f}%\n"
+                f"Level Fibonacci:\n" +
+                "\n".join([f"  - {k}: {v:.2f}" for k,v in levels.items()])
+            )
+        send_telegram(chat_id, msg)
+
     Thread(target=handle_signal).start()
+
     return "ok", 200
 
-# --- Run ---
+
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(debug=False, port=5000)
