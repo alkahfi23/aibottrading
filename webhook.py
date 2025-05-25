@@ -9,7 +9,6 @@ from threading import Thread
 
 app = Flask(__name__)
 
-# ENV
 BINANCE_API_KEY = os.getenv("BINANCE_API_KEY")
 BINANCE_API_SECRET = os.getenv("BINANCE_API_SECRET")
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -18,7 +17,6 @@ client = Client(BINANCE_API_KEY, BINANCE_API_SECRET)
 last_request_time = defaultdict(float)
 RATE_LIMIT_SECONDS = 60
 
-# --- Tools ---
 def send_telegram(chat_id, message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {"chat_id": chat_id, "text": message}
@@ -56,45 +54,6 @@ def is_valid_futures_symbol(symbol):
     except:
         return False
 
-def get_active_futures_pairs():
-    try:
-        info = client.futures_exchange_info()
-        return sorted([s["symbol"] for s in info["symbols"] if s["contractType"] == "PERPETUAL"])
-    except Exception as e:
-        print("❌ ERROR get_active_futures_pairs:", e)
-        return []
-
-def get_top_volume_pairs(limit=10):
-    try:
-        tickers = client.futures_ticker()
-        sorted_pairs = sorted(tickers, key=lambda x: float(x["quoteVolume"]), reverse=True)
-        return [(t["symbol"], float(t["quoteVolume"])) for t in sorted_pairs[:limit]]
-    except:
-        return []
-
-def get_support_resistance_pairs(limit=30):
-    pairs = get_active_futures_pairs()
-    near_support, near_resistance = [], []
-    for symbol in pairs[:limit]:
-        try:
-            klines = get_klines(symbol, interval="1h")
-            if not klines:
-                continue
-            closes = [float(k[4]) for k in klines]
-            price_now = closes[-1]
-            levels = fibonacci_levels(closes)
-            support = levels["0.618"]
-            resistance = levels["0.236"]
-            tolerance = 0.002 # 0.3%
-
-            if abs(price_now - support) / support <= tolerance:
-                near_support.append((symbol, price_now, support))
-            if abs(price_now - resistance) / resistance <= tolerance:
-                near_resistance.append((symbol, price_now, resistance))
-        except:
-            continue
-    return near_support, near_resistance
-
 def analyze_signal(symbol):
     trend = {"LONG": 0, "SHORT": 0}
     levels = {}
@@ -118,19 +77,48 @@ def analyze_signal(symbol):
         if tf == "1h":
             levels = fibonacci_levels(closes)
 
-    if trend["LONG"] >= 2:
-        signal = "LONG"
-    elif trend["SHORT"] >= 2:
-        signal = "SHORT"
-    else:
-        signal = "NONE"
+    signal = "LONG" if trend["LONG"] >= 2 else "SHORT" if trend["SHORT"] >= 2 else "NONE"
+    score = trend["LONG"] if signal == "LONG" else trend["SHORT"]
+    return signal, price_now, levels, score
 
-    confidence = max(trend["LONG"], trend["SHORT"]) * 25  # 0–100 scale
-    recommendation = "Entry Saat Ini" if signal != "NONE" else "Tunggu Konfirmasi"
+def get_active_futures_pairs():
+    try:
+        info = client.futures_exchange_info()
+        symbols = [s["symbol"] for s in info["symbols"] if s["contractType"] == "PERPETUAL"]
+        return sorted(symbols)
+    except:
+        return []
 
-    return signal, price_now, levels, confidence, recommendation
+def get_top_volume_pairs():
+    try:
+        tickers = client.futures_ticker()
+        sorted_tickers = sorted(tickers, key=lambda x: float(x["quoteVolume"]), reverse=True)
+        return [t["symbol"] for t in sorted_tickers[:10]]
+    except:
+        return []
 
-# --- Webhook Endpoint ---
+def check_support_resistance():
+    support_list = []
+    resistance_list = []
+    tolerance = 0.003  # 0.3%
+
+    for symbol in get_active_futures_pairs():
+        klines = get_klines(symbol, "1h")
+        if not klines:
+            continue
+        closes = [float(k[4]) for k in klines]
+        price_now = closes[-1]
+        fibo = fibonacci_levels(closes)
+        fib_618 = fibo["0.618"]
+        fib_236 = fibo["0.236"]
+
+        if abs(price_now - fib_618) / fib_618 < tolerance:
+            support_list.append((symbol, price_now, fib_618))
+        if abs(price_now - fib_236) / fib_236 < tolerance:
+            resistance_list.append((symbol, price_now, fib_236))
+
+    return support_list, resistance_list
+
 @app.route("/", methods=["POST"])
 def webhook():
     data = request.get_json()
@@ -140,57 +128,61 @@ def webhook():
     chat_id = data["message"]["chat"]["id"]
     text = data["message"].get("text", "").strip().upper()
 
-    if text == "PAIRS":
-        pairs = get_active_futures_pairs()
-        if not pairs:
-            send_telegram(chat_id, "⚠️ Gagal mengambil daftar pair dari Binance.")
-        else:
-            message = "✅ Daftar Pair Binance Futures Aktif:\n"
-            message += ", ".join(pairs[:50]) + "..."
-            send_telegram(chat_id, message)
-        return "ok", 200
-
-    if text == "PAIRSVOL":
-        top_vols = get_top_volume_pairs()
-        if not top_vols:
-            send_telegram(chat_id, "⚠️ Gagal mengambil data volume.")
-        else:
-            msg = "🔥 Top 10 Volume Pair Binance Futures:\n"
-            for s, v in top_vols:
-                msg += f"• {s} - {v:.2f}\n"
-            send_telegram(chat_id, msg)
-        return "ok", 200
-
-    if text == "PAIRSUP":
-        near_support, _ = get_support_resistance_pairs()
-        if not near_support:
-            send_telegram(chat_id, "Tidak ada pair yang dekat dengan support saat ini.")
-        else:
-            msg = "🟢 Pair Dekat Support (±0.3% dari Fib 0.618):\n"
-            for s, p, lvl in near_support:
-                msg += f"• {s}: {p:.2f} (Support: {lvl:.2f})\n"
-            send_telegram(chat_id, msg)
-        return "ok", 200
-
-    if text == "PAIREST":
-        _, near_resistance = get_support_resistance_pairs()
-        if not near_resistance:
-            send_telegram(chat_id, "Tidak ada pair yang dekat dengan resistance saat ini.")
-        else:
-            msg = "🔴 Pair Dekat Resistance (±0.3% dari Fib 0.236):\n"
-            for s, p, lvl in near_resistance:
-                msg += f"• {s}: {p:.2f} (Resistance: {lvl:.2f})\n"
-            send_telegram(chat_id, msg)
-        return "ok", 200
-
-    if not text.isalnum() or len(text) < 6:
-        return "ok", 200
-
     now = time.time()
     if now - last_request_time[chat_id] < RATE_LIMIT_SECONDS:
         send_telegram(chat_id, "⏳ Tunggu sebentar ya, coba lagi 1 menit lagi.")
         return "ok", 200
     last_request_time[chat_id] = now
+
+    if text == "PAIRS":
+        pairs = get_active_futures_pairs()
+        if not pairs:
+            send_telegram(chat_id, "⚠️ Gagal mengambil daftar pair dari Binance.")
+        else:
+            msg = "✅ Daftar Pair Binance Futures Aktif (PERPETUAL):\n" + ", ".join(pairs[:50]) + "..."
+            send_telegram(chat_id, msg)
+        return "ok", 200
+
+    if text == "PAIRSVOL":
+        try:
+            top_pairs = get_top_volume_pairs()
+            msg = "🔥 10 Pair Volume Tertinggi:\n" + "\n".join(f"• {p}" for p in top_pairs)
+            send_telegram(chat_id, msg)
+        except:
+            send_telegram(chat_id, "⚠️ Gagal mengambil data volume.")
+        return "ok", 200
+
+    if text == "PAIRSUP" or text == "PAIREST":
+        support, resistance = check_support_resistance()
+        if text == "PAIRSUP":
+            msg = "🟢 Pair Dekat Support (±0.3% dari Fib 0.618):\n" + "\n".join(
+                f"• {s}: {p:.2f} (Support: {f:.2f})" for s, p, f in support
+            )
+        else:
+            msg = "🔴 Pair Dekat Resistance (±0.3% dari Fib 0.236):\n" + "\n".join(
+                f"• {s}: {p:.2f} (Resistance: {f:.2f})" for s, p, f in resistance
+            )
+        send_telegram(chat_id, msg or "Tidak ada pair yang cocok saat ini.")
+        return "ok", 200
+
+    if text == "LONG" or text == "SHORT":
+        pairs = get_active_futures_pairs()
+        matched = []
+
+        for symbol in pairs:
+            signal, price, _, score = analyze_signal(symbol)
+            if signal == text:
+                matched.append(f"• {symbol} ({signal} / Score: {score})")
+
+        if matched:
+            msg = f"✅ Daftar Pair dengan Sinyal {text}:\n" + "\n".join(matched)
+        else:
+            msg = f"⚠️ Tidak ditemukan pair dengan sinyal {text} saat ini."
+        send_telegram(chat_id, msg)
+        return "ok", 200
+
+    if not text.isalnum() or len(text) < 6:
+        return "ok", 200
 
     def handle_signal():
         symbol = text
@@ -198,23 +190,22 @@ def webhook():
             send_telegram(chat_id, f"⚠️ Symbol `{symbol}` tidak ditemukan di Binance Futures.")
             return
         try:
-            signal, price, fibo, confidence, recommendation = analyze_signal(symbol)
+            signal, price, fibo, score = analyze_signal(symbol)
             if signal == "NONE":
                 send_telegram(chat_id, f"⚠️ Belum ada sinyal valid untuk {symbol} saat ini.")
             else:
                 fibo_str = "\n".join([f"🔹 {k}: {v:.2f}" for k, v in fibo.items()])
-                message = (
+                level_note = "🟢 Dekat Support!" if abs(price - fibo["0.618"]) / fibo["0.618"] < 0.003 else (
+                             "🔴 Dekat Resistance!" if abs(price - fibo["0.236"]) / fibo["0.236"] < 0.003 else "")
+                msg = (
                     f"📊 Rekomendasi Trading Futures\n"
                     f"📍 Pair: {symbol}\n"
-                    f"🧭 Sinyal: {signal}\n"
+                    f"🧭 Sinyal: {signal} (Skor: {score}/4)\n"
                     f"💰 Harga Sekarang: {price:.2f}\n"
-                    f"✅ Rekomendasi: {recommendation}\n"
-                    f"📊 Skor Kepercayaan: {confidence}%\n"
                     f"📐 Fibonacci Levels:\n{fibo_str}\n"
-                    f"🟢 Support (0.618): {fibo['0.618']:.2f}\n"
-                    f"🔴 Resistance (0.236): {fibo['0.236']:.2f}"
+                    f"{level_note}"
                 )
-                send_telegram(chat_id, message)
+                send_telegram(chat_id, msg)
         except Exception as e:
             print("❌ ERROR:", e)
             send_telegram(chat_id, "❌ Terjadi kesalahan saat memproses sinyal.")
@@ -222,7 +213,6 @@ def webhook():
     Thread(target=handle_signal).start()
     return "ok", 200
 
-# --- Run App ---
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
