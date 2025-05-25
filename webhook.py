@@ -165,22 +165,6 @@ def webhook():
         send_telegram(chat_id, msg or "Tidak ada pair yang cocok saat ini.")
         return "ok", 200
 
-    if text == "LONG" or text == "SHORT":
-        pairs = get_active_futures_pairs()
-        matched = []
-
-        for symbol in pairs:
-            signal, price, _, score = analyze_signal(symbol)
-            if signal == text:
-                matched.append(f"• {symbol} ({signal} / Score: {score})")
-
-        if matched:
-            msg = f"✅ Daftar Pair dengan Sinyal {text}:\n" + "\n".join(matched)
-        else:
-            msg = f"⚠️ Tidak ditemukan pair dengan sinyal {text} saat ini."
-        send_telegram(chat_id, msg)
-        return "ok", 200
-
     if not text.isalnum() or len(text) < 6:
         return "ok", 200
 
