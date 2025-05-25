@@ -1,10 +1,9 @@
 flask
 python-binance
 requests
-python-dotenv
 numpy
-ta
+pandas
 matplotlib
 mplfinance
-
+python-dotenv
 
