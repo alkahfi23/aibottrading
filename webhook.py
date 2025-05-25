@@ -41,13 +41,12 @@ def bollinger_bands(prices, period=20, std_dev=2):
 def fibonacci_levels(prices):
     high, low = max(prices), min(prices)
     diff = high - low
-    levels = {
+    return {
         "0.236": high - diff * 0.236,
         "0.382": high - diff * 0.382,
         "0.5": high - diff * 0.5,
         "0.618": high - diff * 0.618,
     }
-    return high, low, levels
 
 def is_valid_futures_symbol(symbol):
     try:
@@ -56,6 +55,45 @@ def is_valid_futures_symbol(symbol):
         return symbol.upper() in symbols
     except:
         return False
+
+def get_active_futures_pairs():
+    try:
+        info = client.futures_exchange_info()
+        return sorted([s["symbol"] for s in info["symbols"] if s["contractType"] == "PERPETUAL"])
+    except Exception as e:
+        print("❌ ERROR get_active_futures_pairs:", e)
+        return []
+
+def get_top_volume_pairs(limit=10):
+    try:
+        tickers = client.futures_ticker()
+        sorted_pairs = sorted(tickers, key=lambda x: float(x["quoteVolume"]), reverse=True)
+        return [(t["symbol"], float(t["quoteVolume"])) for t in sorted_pairs[:limit]]
+    except:
+        return []
+
+def get_support_resistance_pairs(limit=30):
+    pairs = get_active_futures_pairs()
+    near_support, near_resistance = [], []
+    for symbol in pairs[:limit]:
+        try:
+            klines = get_klines(symbol, interval="1h")
+            if not klines:
+                continue
+            closes = [float(k[4]) for k in klines]
+            price_now = closes[-1]
+            levels = fibonacci_levels(closes)
+            support = levels["0.618"]
+            resistance = levels["0.236"]
+            tolerance = 0.003  # 0.3%
+
+            if abs(price_now - support) / support <= tolerance:
+                near_support.append((symbol, price_now, support))
+            if abs(price_now - resistance) / resistance <= tolerance:
+                near_resistance.append((symbol, price_now, resistance))
+        except:
+            continue
+    return near_support, near_resistance
 
 def analyze_signal(symbol):
     trend = {"LONG": 0, "SHORT": 0}
@@ -78,38 +116,19 @@ def analyze_signal(symbol):
             trend["SHORT"] += 1
 
         if tf == "1h":
-            high, low, levels = fibonacci_levels(closes)
+            levels = fibonacci_levels(closes)
 
-    signal = "LONG" if trend["LONG"] >= 2 else "SHORT" if trend["SHORT"] >= 2 else "NONE"
-    confidence = max(trend["LONG"], trend["SHORT"]) * 25  # skala 0-100
-    entry = ""
-    if signal == "LONG":
-        entry = f"Entry dekat support: {levels['0.618']:.2f}"
-    elif signal == "SHORT":
-        entry = f"Entry dekat resistance: {levels['0.236']:.2f}"
+    if trend["LONG"] >= 2:
+        signal = "LONG"
+    elif trend["SHORT"] >= 2:
+        signal = "SHORT"
+    else:
+        signal = "NONE"
 
-    return signal, price_now, levels, entry, confidence
+    confidence = max(trend["LONG"], trend["SHORT"]) * 25  # 0–100 scale
+    recommendation = "Entry Saat Ini" if signal != "NONE" else "Tunggu Konfirmasi"
 
-def get_active_futures_pairs():
-    try:
-        info = client.futures_exchange_info()
-        symbols = [s["symbol"] for s in info["symbols"] if s["contractType"] == "PERPETUAL"]
-        return sorted(symbols)
-    except Exception as e:
-        print("❌ ERROR get_active_futures_pairs:", e)
-        return []
-
-def get_top_volume_pairs(n=10):
-    try:
-        tickers = client.futures_ticker()
-        exchange_info = client.futures_exchange_info()
-        perpetual_symbols = {s["symbol"] for s in exchange_info["symbols"] if s["contractType"] == "PERPETUAL"}
-        perpetuals = [t for t in tickers if t["symbol"] in perpetual_symbols]
-        sorted_by_vol = sorted(perpetuals, key=lambda x: float(x["quoteVolume"]), reverse=True)
-        return sorted_by_vol[:n]
-    except Exception as e:
-        print("❌ ERROR get_top_volume_pairs:", e)
-        return []
+    return signal, price_now, levels, confidence, recommendation
 
 # --- Webhook Endpoint ---
 @app.route("/", methods=["POST"])
@@ -121,50 +140,65 @@ def webhook():
     chat_id = data["message"]["chat"]["id"]
     text = data["message"].get("text", "").strip().upper()
 
-    # --- Command: PAIRS ---
     if text == "PAIRS":
         pairs = get_active_futures_pairs()
         if not pairs:
             send_telegram(chat_id, "⚠️ Gagal mengambil daftar pair dari Binance.")
         else:
-            message = "✅ Daftar Pair Binance Futures Aktif (PERPETUAL):\n"
+            message = "✅ Daftar Pair Binance Futures Aktif:\n"
             message += ", ".join(pairs[:50]) + "..."
             send_telegram(chat_id, message)
         return "ok", 200
 
-    # --- Command: PAIRSVOL ---
     if text == "PAIRSVOL":
-        top_pairs = get_top_volume_pairs()
-        if not top_pairs:
+        top_vols = get_top_volume_pairs()
+        if not top_vols:
             send_telegram(chat_id, "⚠️ Gagal mengambil data volume.")
         else:
-            message = "🔥 Top 10 Pair Volume Tertinggi (24h):\n"
-            for p in top_pairs:
-                vol = float(p["quoteVolume"])
-                message += f"• {p['symbol']}: {vol:,.0f} USDT\n"
-            send_telegram(chat_id, message)
+            msg = "🔥 Top 10 Volume Pair Binance Futures:\n"
+            for s, v in top_vols:
+                msg += f"• {s} - {v:.2f}\n"
+            send_telegram(chat_id, msg)
         return "ok", 200
 
-    # --- Validasi simbol ---
+    if text == "PAIRSUP":
+        near_support, _ = get_support_resistance_pairs()
+        if not near_support:
+            send_telegram(chat_id, "Tidak ada pair yang dekat dengan support saat ini.")
+        else:
+            msg = "🟢 Pair Dekat Support (±0.3% dari Fib 0.618):\n"
+            for s, p, lvl in near_support:
+                msg += f"• {s}: {p:.2f} (Support: {lvl:.2f})\n"
+            send_telegram(chat_id, msg)
+        return "ok", 200
+
+    if text == "PAIREST":
+        _, near_resistance = get_support_resistance_pairs()
+        if not near_resistance:
+            send_telegram(chat_id, "Tidak ada pair yang dekat dengan resistance saat ini.")
+        else:
+            msg = "🔴 Pair Dekat Resistance (±0.3% dari Fib 0.236):\n"
+            for s, p, lvl in near_resistance:
+                msg += f"• {s}: {p:.2f} (Resistance: {lvl:.2f})\n"
+            send_telegram(chat_id, msg)
+        return "ok", 200
+
     if not text.isalnum() or len(text) < 6:
         return "ok", 200
 
-    # --- Rate limiter ---
     now = time.time()
     if now - last_request_time[chat_id] < RATE_LIMIT_SECONDS:
         send_telegram(chat_id, "⏳ Tunggu sebentar ya, coba lagi 1 menit lagi.")
         return "ok", 200
-
     last_request_time[chat_id] = now
 
-    # --- Threaded Analysis ---
     def handle_signal():
         symbol = text
         if not is_valid_futures_symbol(symbol):
             send_telegram(chat_id, f"⚠️ Symbol `{symbol}` tidak ditemukan di Binance Futures.")
             return
         try:
-            signal, price, fibo, entry, confidence = analyze_signal(symbol)
+            signal, price, fibo, confidence, recommendation = analyze_signal(symbol)
             if signal == "NONE":
                 send_telegram(chat_id, f"⚠️ Belum ada sinyal valid untuk {symbol} saat ini.")
             else:
@@ -174,9 +208,11 @@ def webhook():
                     f"📍 Pair: {symbol}\n"
                     f"🧭 Sinyal: {signal}\n"
                     f"💰 Harga Sekarang: {price:.2f}\n"
-                    f"{entry}\n"
+                    f"✅ Rekomendasi: {recommendation}\n"
+                    f"📊 Skor Kepercayaan: {confidence}%\n"
                     f"📐 Fibonacci Levels:\n{fibo_str}\n"
-                    f"✅ Confidence Score: {confidence}%"
+                    f"🟢 Support (0.618): {fibo['0.618']:.2f}\n"
+                    f"🔴 Resistance (0.236): {fibo['0.236']:.2f}"
                 )
                 send_telegram(chat_id, message)
         except Exception as e:
