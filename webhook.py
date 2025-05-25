@@ -82,6 +82,15 @@ def analyze_signal(symbol):
     signal = "LONG" if trend["LONG"] >= 2 else "SHORT" if trend["SHORT"] >= 2 else "NONE"
     return signal, price_now, levels
 
+def get_active_futures_pairs():
+    try:
+        info = client.futures_exchange_info()
+        symbols = [s["symbol"] for s in info["symbols"] if s["contractType"] == "PERPETUAL"]
+        return sorted(symbols)
+    except Exception as e:
+        print("❌ ERROR get_active_futures_pairs:", e)
+        return []
+
 # --- Webhook Endpoint ---
 @app.route("/", methods=["POST"])
 def webhook():
@@ -126,6 +135,17 @@ def webhook():
             send_telegram(chat_id, "❌ Terjadi kesalahan saat memproses sinyal.")
 
     Thread(target=handle_signal).start()
+    return "ok", 200
+text = data["message"].get("text", "").strip().upper()
+
+if text == "PAIRS":
+    pairs = get_active_futures_pairs()
+    if not pairs:
+        send_telegram(chat_id, "⚠️ Gagal mengambil daftar pair dari Binance.")
+    else:
+        message = "✅ Daftar Pair Binance Futures Aktif (PERPETUAL):\n"
+        message += ", ".join(pairs[:50]) + "..."  # batasi agar tak terlalu panjang
+        send_telegram(chat_id, message)
     return "ok", 200
 
 # --- Run App ---
