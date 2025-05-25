@@ -1,8 +1,10 @@
 import os
 import requests
+import numpy as np
+import time
 from flask import Flask, request
 from binance.client import Client
-import numpy as np
+from collections import defaultdict
 
 app = Flask(__name__)
 
