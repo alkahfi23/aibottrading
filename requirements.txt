@@ -5,4 +5,4 @@ python-dotenv
 numpy
 ta
 matplotlib
-mlfinance
+mplfinance
