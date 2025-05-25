@@ -13,7 +13,6 @@ app = Flask(__name__)
 BINANCE_API_KEY = os.getenv("BINANCE_API_KEY")
 BINANCE_API_SECRET = os.getenv("BINANCE_API_SECRET")
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-PORT = os.getenv("PORT")
 
 client = Client(BINANCE_API_KEY, BINANCE_API_SECRET)
 last_request_time = defaultdict(float)
