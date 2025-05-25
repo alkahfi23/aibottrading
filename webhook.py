@@ -139,25 +139,39 @@ def plot_candlestick_fibonacci_chart(symbol):
     df.set_index("Date", inplace=True)
 
     fibo = fibonacci_levels(df["Close"].values)
+    prices_fibo = [price for price in fibo.values()]
+    colors_fibo = ["g", "b", "r", "y"]
+
     hlines = dict(
-        hlines=[price for price in fibo.values()],
-        colors=["g", "b", "r", "y"],
+        hlines=prices_fibo,
+        colors=colors_fibo,
         linestyle='--',
         linewidths=1,
-        alpha=0.7,
-        label=[f"Fib {level}" for level in fibo.keys()]
+        alpha=0.7
     )
 
-    fig, axlist = mpf.plot(df, type='candle', style='charles',
-                           hlines=hlines,
-                           returnfig=True,
-                           title=f"{symbol} 1h Candlestick + Fibonacci",
-                           figsize=(10,6))
+    fig, axlist = mpf.plot(
+        df, type='candle', style='charles',
+        hlines=hlines,
+        returnfig=True,
+        title=f"{symbol} 1h Candlestick + Fibonacci",
+        figsize=(10,6)
+    )
+    ax = axlist[0]
+
+    # Tambahkan label manual untuk setiap garis fibonacci
+    for price, level, color in zip(prices_fibo, fibo.keys(), colors_fibo):
+        # teks di kanan chart, di price tertentu
+        ax.text(df.index[-1], price, f"Fib {level}", color=color, fontsize=9,
+                verticalalignment='bottom', horizontalalignment='right',
+                backgroundcolor='white', alpha=0.6)
+
     buf = io.BytesIO()
     fig.savefig(buf, format="png")
     buf.seek(0)
     plt.close(fig)
     return buf
+
 
 # --- Webhook ---
 @app.route("/", methods=["POST"])
