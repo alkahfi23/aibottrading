@@ -161,17 +161,19 @@ def plot_candlestick_fibonacci_chart(symbol):
 
     # Tambahkan label manual untuk setiap garis fibonacci
     for price, level, color in zip(prices_fibo, fibo.keys(), colors_fibo):
-        # teks di kanan chart, di price tertentu
         ax.text(df.index[-1], price, f"Fib {level}", color=color, fontsize=9,
                 verticalalignment='bottom', horizontalalignment='right',
                 backgroundcolor='white', alpha=0.6)
+
+    # Tambahkan watermark label transparan di atas chart
+    fig.text(0.5, 0.95, "Signal Future Pro", fontsize=14, color="gray",
+             ha="center", va="top", alpha=0.3, fontweight='bold')
 
     buf = io.BytesIO()
     fig.savefig(buf, format="png")
     buf.seek(0)
     plt.close(fig)
     return buf
-
 
 # --- Webhook ---
 @app.route("/", methods=["POST"])
