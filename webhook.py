@@ -85,7 +85,7 @@ def get_support_resistance_pairs(limit=30):
             levels = fibonacci_levels(closes)
             support = levels["0.618"]
             resistance = levels["0.236"]
-            tolerance = 0.003  # 0.3%
+            tolerance = 0.002 # 0.3%
 
             if abs(price_now - support) / support <= tolerance:
                 near_support.append((symbol, price_now, support))
