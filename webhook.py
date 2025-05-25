@@ -90,10 +90,6 @@ def webhook():
     data = request.get_json()
     if "message" not in data:
         return "ok", 200
-        
-    if __name__ == "__main__":
-        port = int(os.environ.get("PORT", 5000))
-        app.run(host="0.0.0.0", port=port)
     
     chat_id = data["message"]["chat"]["id"]
     text = data["message"].get("text", "").strip().upper()
@@ -134,3 +130,7 @@ def webhook():
         send_telegram(chat_id, "❌ Terjadi kesalahan saat memproses sinyal.")
 
     return "ok", 200
+
+if __name__ == "__main__":
+        port = int(os.environ.get("PORT", 5000))
+        app.run(host="0.0.0.0", port=port)
