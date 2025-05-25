@@ -101,9 +101,22 @@ def webhook():
     chat_id = data["message"]["chat"]["id"]
     text = data["message"].get("text", "").strip().upper()
 
+    # ✅ Tambahkan pengecekan command PAIRS di sini
+    if text == "PAIRS":
+        pairs = get_active_futures_pairs()
+        if not pairs:
+            send_telegram(chat_id, "⚠️ Gagal mengambil daftar pair dari Binance.")
+        else:
+            message = "✅ Daftar Pair Binance Futures Aktif (PERPETUAL):\n"
+            message += ", ".join(pairs[:50]) + "..."  # batasi agar tak terlalu panjang
+            send_telegram(chat_id, message)
+        return "ok", 200
+
+    # ⛔ Jika bukan command, validasi dulu input minimal 6 huruf dan alfanumerik
     if not text.isalnum() or len(text) < 6:
         return "ok", 200
 
+    # 🔁 Rate limiter
     now = time.time()
     if now - last_request_time[chat_id] < RATE_LIMIT_SECONDS:
         send_telegram(chat_id, "⏳ Tunggu sebentar ya, coba lagi 1 menit lagi.")
@@ -111,6 +124,7 @@ def webhook():
 
     last_request_time[chat_id] = now
 
+    # 🔍 Proses sinyal di thread terpisah
     def handle_signal():
         symbol = text
         if not is_valid_futures_symbol(symbol):
@@ -135,17 +149,6 @@ def webhook():
             send_telegram(chat_id, "❌ Terjadi kesalahan saat memproses sinyal.")
 
     Thread(target=handle_signal).start()
-    return "ok", 200
-text = data["message"].get("text", "").strip().upper()
-
-if text == "PAIRS":
-    pairs = get_active_futures_pairs()
-    if not pairs:
-        send_telegram(chat_id, "⚠️ Gagal mengambil daftar pair dari Binance.")
-    else:
-        message = "✅ Daftar Pair Binance Futures Aktif (PERPETUAL):\n"
-        message += ", ".join(pairs[:50]) + "..."  # batasi agar tak terlalu panjang
-        send_telegram(chat_id, message)
     return "ok", 200
 
 # --- Run App ---
