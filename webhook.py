@@ -5,9 +5,7 @@ import time
 from flask import Flask, request
 from binance.client import Client
 from collections import defaultdict
-
-last_request_time = defaultdict(float)  # key: chat_id, value: timestamp
-RATE_LIMIT_SECONDS = 60  # 1 menit
+from threading import Thread
 
 app = Flask(__name__)
 
@@ -17,6 +15,8 @@ BINANCE_API_SECRET = os.getenv("BINANCE_API_SECRET")
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 
 client = Client(BINANCE_API_KEY, BINANCE_API_SECRET)
+last_request_time = defaultdict(float)
+RATE_LIMIT_SECONDS = 60
 
 # === TOOLS ===
 def send_telegram(chat_id, message):
@@ -90,16 +90,14 @@ def webhook():
     data = request.get_json()
     if "message" not in data:
         return "ok", 200
-    
+
     chat_id = data["message"]["chat"]["id"]
     text = data["message"].get("text", "").strip().upper()
 
+    # Batasi input agar valid simbol
     if not text.isalnum() or len(text) < 6:
         return "ok", 200
 
-    symbol = text
-
-    # Rate limit: max 1 request per chat_id per 60 detik
     now = time.time()
     if now - last_request_time[chat_id] < RATE_LIMIT_SECONDS:
         send_telegram(chat_id, "⏳ Tunggu sebentar ya, grup ini baru saja kirim permintaan. Coba lagi 1 menit lagi.")
@@ -107,30 +105,35 @@ def webhook():
 
     last_request_time[chat_id] = now
 
-    if not is_valid_futures_symbol(symbol):
-        send_telegram(chat_id, f"⚠️ Symbol `{symbol}` tidak ditemukan di Binance Futures.")
-        return "ok", 200
+    # Proses sinyal di thread baru agar respons cepat ke Telegram
+    def handle_signal():
+        symbol = text
+        if not is_valid_futures_symbol(symbol):
+            send_telegram(chat_id, f"⚠️ Symbol `{symbol}` tidak ditemukan di Binance Futures.")
+            return
 
-    try:
-        signal, price, fibo = analyze_signal(symbol)
-        if signal == "NONE":
-            send_telegram(chat_id, f"⚠️ Belum ada sinyal valid untuk {symbol} saat ini.")
-        else:
-            fibo_str = "\n".join([f"🔹 {k}: {v:.2f}" for k, v in fibo.items()])
-            message = (
-                f"📊 Rekomendasi Trading Futures\n"
-                f"📍 Pair: {symbol}\n"
-                f"🧭 Sinyal: {signal}\n"
-                f"💰 Harga Sekarang: {price:.2f}\n"
-                f"📐 Support & Resistance (Fibonacci):\n{fibo_str}"
-            )
-            send_telegram(chat_id, message)
-    except Exception as e:
-        print("❌ ERROR:", e)
-        send_telegram(chat_id, "❌ Terjadi kesalahan saat memproses sinyal.")
+        try:
+            signal, price, fibo = analyze_signal(symbol)
+            if signal == "NONE":
+                send_telegram(chat_id, f"⚠️ Belum ada sinyal valid untuk {symbol} saat ini.")
+            else:
+                fibo_str = "\n".join([f"🔹 {k}: {v:.2f}" for k, v in fibo.items()])
+                message = (
+                    f"📊 Rekomendasi Trading Futures\n"
+                    f"📍 Pair: {symbol}\n"
+                    f"🧭 Sinyal: {signal}\n"
+                    f"💰 Harga Sekarang: {price:.2f}\n"
+                    f"📐 Support & Resistance (Fibonacci):\n{fibo_str}"
+                )
+                send_telegram(chat_id, message)
+        except Exception as e:
+            print("❌ ERROR:", e)
+            send_telegram(chat_id, "❌ Terjadi kesalahan saat memproses sinyal.")
 
+    Thread(target=handle_signal).start()
     return "ok", 200
 
+# === RUN APP ===
 if __name__ == "__main__":
-        port = int(os.environ.get("PORT", 5000))
-        app.run(host="0.0.0.0", port=port)
+    port = int(os.environ.get("PORT", 5000))  # disarankan port 5000
+    app.run(host="0.0.0.0", port=port)
