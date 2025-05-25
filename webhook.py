@@ -9,7 +9,7 @@ from threading import Thread
 
 app = Flask(__name__)
 
-# === ENV ===
+# ENV
 BINANCE_API_KEY = os.getenv("BINANCE_API_KEY")
 BINANCE_API_SECRET = os.getenv("BINANCE_API_SECRET")
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -18,12 +18,11 @@ client = Client(BINANCE_API_KEY, BINANCE_API_SECRET)
 last_request_time = defaultdict(float)
 RATE_LIMIT_SECONDS = 60
 
-# === TOOLS ===
+# --- Tools ---
 def send_telegram(chat_id, message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {"chat_id": chat_id, "text": message}
-    r = requests.post(url, data=payload)
-    print(f"[Telegram] {r.status_code} | {r.text}")
+    requests.post(url, data=payload)
 
 def get_klines(symbol, interval="1m", limit=100):
     try:
@@ -66,7 +65,6 @@ def analyze_signal(symbol):
         klines = get_klines(symbol, tf)
         if not klines:
             continue
-
         closes = [float(k[4]) for k in klines]
         ema4 = ema(closes, 4)
         ema20 = ema(closes, 20)
@@ -84,7 +82,7 @@ def analyze_signal(symbol):
     signal = "LONG" if trend["LONG"] >= 2 else "SHORT" if trend["SHORT"] >= 2 else "NONE"
     return signal, price_now, levels
 
-# === WEBHOOK ===
+# --- Webhook Endpoint ---
 @app.route("/", methods=["POST"])
 def webhook():
     data = request.get_json()
@@ -94,24 +92,21 @@ def webhook():
     chat_id = data["message"]["chat"]["id"]
     text = data["message"].get("text", "").strip().upper()
 
-    # Batasi input agar valid simbol
     if not text.isalnum() or len(text) < 6:
         return "ok", 200
 
     now = time.time()
     if now - last_request_time[chat_id] < RATE_LIMIT_SECONDS:
-        send_telegram(chat_id, "⏳ Tunggu sebentar ya, grup ini baru saja kirim permintaan. Coba lagi 1 menit lagi.")
+        send_telegram(chat_id, "⏳ Tunggu sebentar ya, coba lagi 1 menit lagi.")
         return "ok", 200
 
     last_request_time[chat_id] = now
 
-    # Proses sinyal di thread baru agar respons cepat ke Telegram
     def handle_signal():
         symbol = text
         if not is_valid_futures_symbol(symbol):
             send_telegram(chat_id, f"⚠️ Symbol `{symbol}` tidak ditemukan di Binance Futures.")
             return
-
         try:
             signal, price, fibo = analyze_signal(symbol)
             if signal == "NONE":
@@ -123,7 +118,7 @@ def webhook():
                     f"📍 Pair: {symbol}\n"
                     f"🧭 Sinyal: {signal}\n"
                     f"💰 Harga Sekarang: {price:.2f}\n"
-                    f"📐 Support & Resistance (Fibonacci):\n{fibo_str}"
+                    f"📐 Fibonacci Levels:\n{fibo_str}"
                 )
                 send_telegram(chat_id, message)
         except Exception as e:
@@ -133,6 +128,7 @@ def webhook():
     Thread(target=handle_signal).start()
     return "ok", 200
 
-# === RUN APP ===
-if __name__ == '__main__':
-    app.run(debug=True, port=os.getenv("PORT", default=5000))
+# --- Run App ---
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
