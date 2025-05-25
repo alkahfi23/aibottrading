@@ -96,14 +96,15 @@ def webhook():
 
     if not text.isalnum() or len(text) < 6:
         return "ok", 200
-        
+
     symbol = text
-    # Batasi 1 request per 60 detik per user
-    # Validasi request per chat_id (bukan per user)
+
+    # Rate limit: max 1 request per chat_id per 60 detik
     now = time.time()
     if now - last_request_time[chat_id] < RATE_LIMIT_SECONDS:
         send_telegram(chat_id, "⏳ Tunggu sebentar ya, grup ini baru saja kirim permintaan. Coba lagi 1 menit lagi.")
-    return "ok", 200
+        return "ok", 200
+
     last_request_time[chat_id] = now
 
     if not is_valid_futures_symbol(symbol):
@@ -127,4 +128,5 @@ def webhook():
     except Exception as e:
         print("❌ ERROR:", e)
         send_telegram(chat_id, "❌ Terjadi kesalahan saat memproses sinyal.")
+
     return "ok", 200
