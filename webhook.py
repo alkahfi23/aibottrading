@@ -89,11 +89,18 @@ def webhook():
         return "ok", 200
 
     chat_id = data["message"]["chat"]["id"]
+    user_id = data["message"]["from"]["id"]
     text = data["message"].get("text", "").strip().upper()
 
-    # Hanya respon jika text adalah simbol yang valid format
     if not text.isalnum() or len(text) < 6:
         return "ok", 200
+        
+    # Batasi 1 request per 60 detik per user
+    now = time.time()
+    if now - last_request_time[user_id] < RATE_LIMIT_SECONDS:
+        send_telegram(chat_id, "⏳ Tunggu sebentar ya, kamu baru kirim permintaan. Coba lagi 1 menit lagi.")
+        return "ok", 200
+    last_request_time[user_id] = now
 
     symbol = text
 
