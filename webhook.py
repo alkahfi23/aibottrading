@@ -58,17 +58,23 @@ def fibonacci_levels(prices):
         "0.618": high - diff * 0.618,
     }
 
-def find_support_demand_levels(prices, window=5, threshold=0.01):
+def find_support_demand_levels(prices, window=5, threshold=0.01, min_distance=0.015):
     supports = []
     resistances = []
+
     for i in range(window, len(prices) - window):
-        if all(prices[i] <= prices[j] for j in range(i - window, i + window + 1)):
-            if not any(abs(prices[i] - s) / prices[i] < threshold for s in supports):
+        is_support = all(prices[i] < prices[j] for j in range(i - window, i + window + 1) if j != i)
+        is_resistance = all(prices[i] > prices[j] for j in range(i - window, i + window + 1) if j != i)
+
+        if is_support:
+            if not any(abs(prices[i] - s) / prices[i] < min_distance for s in supports):
                 supports.append(prices[i])
-        if all(prices[i] >= prices[j] for j in range(i - window, i + window + 1)):
-            if not any(abs(prices[i] - r) / prices[i] < threshold for r in resistances):
+        if is_resistance:
+            if not any(abs(prices[i] - r) / prices[i] < min_distance for r in resistances):
                 resistances.append(prices[i])
+
     return sorted(supports), sorted(resistances)
+
 
 def is_valid_futures_symbol(symbol):
     try:
