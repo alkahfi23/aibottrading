@@ -230,11 +230,11 @@ def webhook_token(token):
             send_telegram(chat_id, "⚠️ Gagal mengambil data chart.")
     return "ok", 200
 
-if not text.isalnum() or len(text) < 6:
+    if not text.isalnum() or len(text) < 6:
     return "ok", 200
 
-if now - last_request_time.get(chat_id, 0) < 60:
-    send_telegram(chat_id, "⏳ Tunggu sebentar ya, coba lagi 1 menit lagi.")
+    if now - last_request_time.get(chat_id, 0) < 60:
+       send_telegram(chat_id, "⏳ Tunggu sebentar ya, coba lagi 1 menit lagi.")
     return "ok", 200
 
 
