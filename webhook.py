@@ -219,23 +219,24 @@ def webhook_token(token):
         return "ok", 200
 
     if text.startswith("CHART "):
-        symbol = text.split(" ")[1]
-        if not is_valid_futures_symbol(symbol):
-            send_telegram(chat_id, f"⚠️ Symbol `{symbol}` tidak ditemukan.")
+    symbol = text.split(" ")[1]
+    if not is_valid_futures_symbol(symbol):
+        send_telegram(chat_id, f"⚠️ Symbol `{symbol}` tidak ditemukan.")
+    else:
+        img = plot_candlestick_fibonacci_chart(symbol)
+        if img:
+            send_telegram_photo(chat_id, img, caption=f"📊 Chart {symbol} + Fibonacci Support/Resistance")
         else:
-            img = plot_candlestick_fibonacci_chart(symbol)
-            if img:
-                send_telegram_photo(chat_id, img, caption=f"📊 Chart {symbol} + Fibonacci Support/Resistance")
-            else:
-                send_telegram(chat_id, "⚠️ Gagal mengambil data chart.")
-        return "ok", 200
+            send_telegram(chat_id, "⚠️ Gagal mengambil data chart.")
+    return "ok", 200
 
-    if not text.isalnum() or len(text) < 6:
-        return "ok", 200
+if not text.isalnum() or len(text) < 6:
+    return "ok", 200
 
-    if now - last_request_time.get(chat_id, 0) < 60:
-        send_telegram(chat_id, "⏳ Tunggu sebentar ya, coba lagi 1 menit lagi.")
-        return "ok", 200
+if now - last_request_time.get(chat_id, 0) < 60:
+    send_telegram(chat_id, "⏳ Tunggu sebentar ya, coba lagi 1 menit lagi.")
+    return "ok", 200
+
 
 
     # --- Handle Signal Analysis ---
