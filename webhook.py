@@ -79,12 +79,11 @@ def analyze_signal(symbol):
         closes = [float(k[4]) for k in klines]
         ema4 = ema(closes, 4)
         ema20 = ema(closes, 20)
-        upper, lower = bollinger_bands(closes)
         price_now = closes[-1]
 
-        if ema4 > ema20 and price_now > upper:
+        if ema4 > ema20 and price_now > ema20:
             trend["LONG"] += 1
-        elif ema4 < ema20 and price_now < lower:
+        elif ema4 < ema20 and price_now < ema20:
             trend["SHORT"] += 1
 
         if tf == "1h":
