@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import io
 import pandas as pd
 import mplfinance as mpf
+import json
 from flask import Flask, request
 from binance.client import Client
 from collections import defaultdict
