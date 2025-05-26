@@ -234,10 +234,10 @@ def webhook_token(token):
         return "ok", 200
 
     now = time.time()
-    if now - last_request_time[chat_id] < RATE_LIMIT_SECONDS:
         send_telegram(chat_id, "⏳ Tunggu sebentar ya, coba lagi 1 menit lagi.")
-        return "ok", 200
+    return "ok", 200
     last_request_time[chat_id] = now
+
 
     # --- Handle Signal Analysis ---
     symbol = text.upper()
