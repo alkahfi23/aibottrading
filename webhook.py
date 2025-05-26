@@ -24,7 +24,7 @@ RATE_LIMIT_SECONDS = 60
 
 # --- Telegram ---
 def send_telegram(chat_id, message, parse_mode="Markdown", reply_markup=None):
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {
         "chat_id": chat_id,
         "text": message,
