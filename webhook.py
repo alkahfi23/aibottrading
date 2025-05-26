@@ -58,7 +58,7 @@ def fibonacci_levels(prices):
         "0.618": high - diff * 0.618,
     }
 
-def find_support_demand_levels(prices, window=5, threshold=0.0075):
+def find_support_demand_levels(prices, window=5, threshold=0.01):
     supports = []
     resistances = []
     for i in range(window, len(prices) - window):
