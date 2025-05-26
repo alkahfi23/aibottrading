@@ -13,7 +13,7 @@ from threading import Thread
 
 app = Flask(__name__)
 
-# ENV
+# --- ENV ---
 BINANCE_API_KEY = os.getenv("BINANCE_API_KEY")
 BINANCE_API_SECRET = os.getenv("BINANCE_API_SECRET")
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -22,7 +22,7 @@ client = Client(BINANCE_API_KEY, BINANCE_API_SECRET)
 last_request_time = defaultdict(float)
 RATE_LIMIT_SECONDS = 60
 
-# --- Tools ---
+# --- Telegram ---
 def send_telegram(chat_id, message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {"chat_id": chat_id, "text": message}
@@ -34,6 +34,7 @@ def send_telegram_photo(chat_id, image_bytes, caption=""):
     data = {"chat_id": chat_id, "caption": caption}
     requests.post(url, files=files, data=data)
 
+# --- Analysis Tools ---
 def get_klines(symbol, interval="1m", limit=100):
     try:
         return client.futures_klines(symbol=symbol, interval=interval, limit=limit)
@@ -96,14 +97,16 @@ def analyze_signal(symbol):
 def get_active_futures_pairs():
     try:
         info = client.futures_exchange_info()
-        return [s["symbol"] for s in info["symbols"] if s["contractType"] == "PERPETUAL"]
+        return [s["symbol"] for s in info["symbols"]
+                if s["contractType"] == "PERPETUAL" and s["symbol"].endswith("USDT")]
     except:
         return []
 
 def get_top_volume_pairs():
     try:
         tickers = client.futures_ticker()
-        sorted_by_vol = sorted(tickers, key=lambda x: float(x["quoteVolume"]), reverse=True)
+        usdt_pairs = [t for t in tickers if t["symbol"].endswith("USDT")]
+        sorted_by_vol = sorted(usdt_pairs, key=lambda x: float(x["quoteVolume"]), reverse=True)
         return [x["symbol"] for x in sorted_by_vol[:10]]
     except:
         return []
@@ -126,7 +129,6 @@ def detect_support_resistance():
             resistance.append((symbol, price, fibo["0.236"]))
     return support, resistance
 
-# Tambahan fungsi untuk candlestick + fibonacci chart
 def plot_candlestick_fibonacci_chart(symbol):
     klines = get_klines(symbol, "1h", 100)
     if not klines:
@@ -158,14 +160,11 @@ def plot_candlestick_fibonacci_chart(symbol):
         figsize=(10,6)
     )
     ax = axlist[0]
-
-    # Tambahkan label manual untuk setiap garis fibonacci
     for price, level, color in zip(prices_fibo, fibo.keys(), colors_fibo):
         ax.text(df.index[-1], price, f"Fib {level}", color=color, fontsize=9,
                 verticalalignment='bottom', horizontalalignment='right',
                 backgroundcolor='white', alpha=0.6)
 
-    # Tambahkan watermark label transparan di atas chart
     fig.text(0.5, 0.95, "Signal Future Pro", fontsize=14, color="gray",
              ha="center", va="top", alpha=0.3, fontweight='bold')
 
@@ -181,20 +180,21 @@ def webhook_token(token):
     if token != TELEGRAM_TOKEN:
         return "Unauthorized", 403
     if request.method == "GET":
-        return "OK", 200  # buat health check
-    return webhook()
+        return "OK", 200
+
+    data = request.get_json()
+    if "message" not in data:
+        return "ok", 200
 
     chat_id = data["message"]["chat"]["id"]
     text = data["message"].get("text", "").strip().upper()
 
-    # PAIRS command
     if text == "PAIRS":
         pairs = get_active_futures_pairs()
         msg = "✅ Pair Binance Futures:\n" + ", ".join(pairs[:50]) + "..."
         send_telegram(chat_id, msg)
         return "ok", 200
 
-    # PAIRSVOL command
     if text == "PAIRSVOL":
         pairs = get_top_volume_pairs()
         if not pairs:
@@ -203,7 +203,6 @@ def webhook_token(token):
             send_telegram(chat_id, "🔥 Top 10 Pair Berdasarkan Volume:\n" + "\n".join(pairs))
         return "ok", 200
 
-    # PAIRSUP / PAIREST
     if text == "PAIRSUP" or text == "PAIREST":
         support, resistance = detect_support_resistance()
         if text == "PAIRSUP":
@@ -215,7 +214,6 @@ def webhook_token(token):
         send_telegram(chat_id, msg)
         return "ok", 200
 
-    # CHART <symbol>
     if text.startswith("CHART "):
         symbol = text.split(" ")[1]
         if not is_valid_futures_symbol(symbol):
@@ -228,18 +226,15 @@ def webhook_token(token):
                 send_telegram_photo(chat_id, img, caption=f"📊 Chart {symbol} + Fibonacci Support/Resistance")
         return "ok", 200
 
-    # Validasi simbol
     if not text.isalnum() or len(text) < 6:
         return "ok", 200
 
-    # Rate limit
     now = time.time()
     if now - last_request_time[chat_id] < RATE_LIMIT_SECONDS:
         send_telegram(chat_id, "⏳ Tunggu sebentar ya, coba lagi 1 menit lagi.")
         return "ok", 200
     last_request_time[chat_id] = now
 
-    # Proses sinyal
     def handle_signal():
         symbol = text
         if not is_valid_futures_symbol(symbol):
@@ -259,9 +254,8 @@ def webhook_token(token):
         send_telegram(chat_id, msg)
 
     Thread(target=handle_signal).start()
-
     return "ok", 200
 
-
+# --- Main ---
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)))
