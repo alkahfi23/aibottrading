@@ -219,7 +219,7 @@ def webhook_token(token):
         return "ok", 200
 
     if text.startswith("CHART "):
-    symbol = text.split(" ")[1]
+       symbol = text.split(" ")[1]
     if not is_valid_futures_symbol(symbol):
         send_telegram(chat_id, f"⚠️ Symbol `{symbol}` tidak ditemukan.")
     else:
