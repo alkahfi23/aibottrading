@@ -176,11 +176,13 @@ def plot_candlestick_fibonacci_chart(symbol):
     return buf
 
 # --- Webhook ---
-@app.route("/<path:token>", methods=["POST"])
+@app.route("/<path:token>", methods=["GET", "POST"])
 def webhook_token(token):
     if token != TELEGRAM_TOKEN:
         return "Unauthorized", 403
-    return webhook()  # panggil fungsi webhook utama
+    if request.method == "GET":
+        return "OK", 200  # buat health check
+    return webhook()
 
     chat_id = data["message"]["chat"]["id"]
     text = data["message"].get("text", "").strip().upper()
