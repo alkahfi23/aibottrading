@@ -67,19 +67,42 @@ def is_valid_futures_symbol(symbol):
     except:
         return False
 
+def find_support_demand_levels(prices, window=5, threshold=0.0015):
+    """
+    Cari support/demand dan resistance berdasarkan local minima/maxima.
+    window: jumlah candle untuk cek minima/maxima lokal
+    threshold: jarak minimal antar level agar unik
+    """
+    supports = []
+    resistances = []
+    length = len(prices)
+    for i in range(window, length - window):
+        local_min = all(prices[i] <= prices[j] for j in range(i - window, i + window + 1))
+        local_max = all(prices[i] >= prices[j] for j in range(i - window, i + window + 1))
+        if local_min:
+            # cek apakah level ini sudah ada dalam supports ±threshold
+            if not any(abs(prices[i] - s) / prices[i] < threshold for s in supports):
+                supports.append(prices[i])
+        if local_max:
+            if not any(abs(prices[i] - r) / prices[i] < threshold for r in resistances):
+                resistances.append(prices[i])
+    return sorted(supports), sorted(resistances)
+
 def analyze_signal(symbol):
     trend = {"LONG": 0, "SHORT": 0}
     levels = {}
     price_now = 0
+    support_levels = []
+    resistance_levels = []
 
     for tf in ["1m", "5m", "15m", "1h"]:
         klines = get_klines(symbol, tf)
         if not klines:
             continue
         closes = [float(k[4]) for k in klines]
+        price_now = closes[-1]
         ema4 = ema(closes, 4)
         ema20 = ema(closes, 20)
-        price_now = closes[-1]
 
         if ema4 > ema20 and price_now > ema20:
             trend["LONG"] += 1
@@ -88,10 +111,12 @@ def analyze_signal(symbol):
 
         if tf == "1h":
             levels = fibonacci_levels(closes)
+            support_levels, resistance_levels = find_support_demand_levels(closes)
 
     signal = "LONG" if trend["LONG"] >= 2 else "SHORT" if trend["SHORT"] >= 2 else "NONE"
     confidence = max(trend["LONG"], trend["SHORT"]) / 4
-    return signal, price_now, levels, confidence
+
+    return signal, price_now, levels, confidence, support_levels, resistance_levels
 
 def get_active_futures_pairs():
     try:
@@ -173,6 +198,7 @@ def plot_candlestick_fibonacci_chart(symbol):
     plt.close(fig)
     return buf
 
+
 # --- Webhook ---
 @app.route("/<path:token>", methods=["GET", "POST"])
 def webhook_token(token):
@@ -234,22 +260,49 @@ def webhook_token(token):
         return "ok", 200
     last_request_time[chat_id] = now
 
-    def handle_signal():
-        symbol = text
-        if not is_valid_futures_symbol(symbol):
-            send_telegram(chat_id, f"⚠️ Symbol `{symbol}` tidak ditemukan.")
-            return
-        signal, price_now, levels, confidence = analyze_signal(symbol)
-        if signal == "NONE":
-            msg = f"⚠️ Tidak ada sinyal jelas untuk {symbol}."
-        else:
-            msg = (
-                f"📈 Sinyal {signal} untuk {symbol}\n"
-                f"Harga Saat Ini: {price_now:.2f}\n"
-                f"Confidence: {confidence*100:.1f}%\n"
-                f"Level Fibonacci:\n" +
-                "\n".join([f"  - {k}: {v:.2f}" for k,v in levels.items()])
-            )
+def handle_signal():
+    symbol = text
+    if not is_valid_futures_symbol(symbol):
+        send_telegram(chat_id, f"⚠️ Symbol `{symbol}` tidak ditemukan.")
+        return
+    signal, price_now, levels, confidence, supports, resistances = analyze_signal(symbol)
+    if signal == "NONE":
+        msg = f"⚠️ Tidak ada sinyal jelas untuk {symbol}."
+    else:
+        # Cek proximity harga dengan support/demand dan resistance (±0.5%)
+        prox_support = [s for s in supports if abs(price_now - s) / price_now < 0.005]
+        prox_resistance = [r for r in resistances if abs(price_now - r) / price_now < 0.005]
+
+        entry_suggestion = ""
+        if signal == "LONG":
+            if prox_support:
+                entry_suggestion = f"💡 Harga dekat support {', '.join(f'{s:.2f}' for s in prox_support)}. Potensi entry LONG bagus."
+            elif prox_resistance:
+                entry_suggestion = f"⚠️ Harga dekat resistance {', '.join(f'{r:.2f}' for r in prox_resistance)}. Hati-hati entry LONG."
+            else:
+                entry_suggestion = "💡 Pertimbangkan entry LONG sesuai sinyal."
+        elif signal == "SHORT":
+            if prox_resistance:
+                entry_suggestion = f"💡 Harga dekat resistance {', '.join(f'{r:.2f}' for r in prox_resistance)}. Potensi entry SHORT bagus."
+            elif prox_support:
+                entry_suggestion = f"⚠️ Harga dekat support {', '.join(f'{s:.2f}' for s in prox_support)}. Hati-hati entry SHORT."
+            else:
+                entry_suggestion = "💡 Pertimbangkan entry SHORT sesuai sinyal."
+
+        msg = (
+            f"📊 Analisis Sinyal untuk {symbol}\n"
+            f"➡️ Sinyal: *{signal}*\n"
+            f"➡️ Harga Saat Ini: {price_now:.2f}\n"
+            f"➡️ Confidence: {confidence*100:.1f}%\n\n"
+            f"🔹 Level Fibonacci:\n" +
+            "\n".join([f"  - {k}: {v:.2f}" for k,v in levels.items()]) +
+            "\n\n" +
+            (f"🟢 Support / Demand Area:\n  - " + ", ".join(f"{s:.2f}" for s in supports) if supports else "🟢 Support / Demand Area: Tidak ada.") +
+            "\n\n" +
+            (f"🔴 Resistance Area:\n  - " + ", ".join(f"{r:.2f}" for r in resistances) if resistances else "🔴 Resistance Area: Tidak ada.") +
+            "\n\n" +
+            entry_suggestion
+        )
         send_telegram(chat_id, msg)
 
     Thread(target=handle_signal).start()
