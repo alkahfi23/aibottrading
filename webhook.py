@@ -233,11 +233,11 @@ def webhook_token(token):
 
     # --- Handle Signal Analysis ---
     symbol = text.upper()
-if not is_valid_futures_symbol(symbol):
+    if not is_valid_futures_symbol(symbol):
     send_telegram(chat_id, f"⚠️ Symbol `{symbol}` tidak ditemukan.")
     return "ok", 200
 
-signal, price_now, levels, confidence, supports, resistances = analyze_signal(symbol)
+    signal, price_now, levels, confidence, supports, resistances = analyze_signal(symbol)
 
 if signal == "NONE":
     send_telegram(chat_id, f"⚠️ Tidak ada sinyal jelas untuk {symbol}.")
@@ -281,8 +281,7 @@ else:
         }]]
     })
 
-return "ok", 200
-
+    return "ok", 200
 
 # --- Start App ---
 if __name__ == "__main__":
