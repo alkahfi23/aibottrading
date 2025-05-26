@@ -232,38 +232,57 @@ def webhook_token(token):
     last_request_time[chat_id] = now
 
     # --- Handle Signal Analysis ---
-    symbol = text
-    if not is_valid_futures_symbol(symbol):
-        send_telegram(chat_id, f"⚠️ Symbol `{symbol}` tidak ditemukan.")
-        return "ok", 200
-
-    signal, price_now, levels, confidence, supports, resistances = analyze_signal(symbol)
-    if signal == "NONE":
-        send_telegram(chat_id, f"⚠️ Tidak ada sinyal jelas untuk {symbol}.")
-    else:
-        prox_support = [s for s in supports if abs(price_now - s) / price_now < 0.005]
-        prox_resistance = [r for r in resistances if abs(price_now - r) / price_now < 0.005]
-
-        if signal == "LONG":
-            entry_msg = "💡 Harga dekat support." if prox_support else "⚠️ Dekat resistance." if prox_resistance else "💡 Sinyal LONG aktif."
-        else:
-            entry_msg = "💡 Harga dekat resistance." if prox_resistance else "⚠️ Dekat support." if prox_support else "💡 Sinyal SHORT aktif."
-
-        msg = (
-            f"📊 *Analisis Sinyal untuk {symbol}*\n"
-            f"➡️ *Sinyal:* {signal}\n"
-            f"➡️ *Harga Saat Ini:* {price_now:.2f}\n"
-            f"➡️ *Confidence:* {confidence*100:.1f}%\n\n"
-            f"🔹 *Level Fibonacci:*\n" + "\n".join([f"  - {k}: {v:.2f}" for k,v in levels.items()]) +
-            "\n\n" +
-            (f"🟢 *Support:*\n" + ", ".join(f"{s:.2f}" for s in supports) if supports else "🟢 Tidak ada support.") +
-            "\n" +
-            (f"🔴 *Resistance:*\n" + ", ".join(f"{r:.2f}" for r in resistances) if resistances else "🔴 Tidak ada resistance.") +
-            "\n\n" +
-            entry_msg
-        )
-        send_telegram(chat_id, msg)
+    symbol = text.upper()
+if not is_valid_futures_symbol(symbol):
+    send_telegram(chat_id, f"⚠️ Symbol `{symbol}` tidak ditemukan.")
     return "ok", 200
+
+signal, price_now, levels, confidence, supports, resistances = analyze_signal(symbol)
+
+if signal == "NONE":
+    send_telegram(chat_id, f"⚠️ Tidak ada sinyal jelas untuk {symbol}.")
+else:
+    prox_support = [s for s in supports if abs(price_now - s) / price_now < 0.005]
+    prox_resistance = [r for r in resistances if abs(price_now - r) / price_now < 0.005]
+
+    # Pesan Entry
+    if signal == "LONG":
+        entry_msg = "💡 Harga dekat support." if prox_support else "⚠️ Dekat resistance." if prox_resistance else "💡 Sinyal LONG aktif."
+    else:
+        entry_msg = "💡 Harga dekat resistance." if prox_resistance else "⚠️ Dekat support." if prox_support else "💡 Sinyal SHORT aktif."
+
+    # Tautan langsung ke chart Binance Futures
+    binance_link = f"https://www.binance.com/en/futures/{symbol}"
+    button = {
+        "text": f"BUKA {symbol} di Binance",
+        "url": binance_link
+    }
+
+    # Format pesan
+    msg = (
+        f"📊 *Analisis Sinyal untuk {symbol}*\n"
+        f"➡️ *Sinyal:* `{signal}`\n"
+        f"➡️ *Harga Saat Ini:* `{price_now:.2f}`\n"
+        f"➡️ *Confidence:* `{confidence*100:.1f}%`\n\n"
+        f"🔹 *Level Fibonacci:*\n" + "\n".join([f"  - {k}: `{v:.2f}`" for k, v in levels.items()]) +
+        "\n\n" +
+        (f"🟢 *Support:*\n" + ", ".join(f"`{s:.2f}`" for s in supports) if supports else "🟢 Tidak ada support.") +
+        "\n" +
+        (f"🔴 *Resistance:*\n" + ", ".join(f"`{r:.2f}`" for r in resistances) if resistances else "🔴 Tidak ada resistance.") +
+        "\n\n" +
+        f"{entry_msg}"
+    )
+
+    # Kirim dengan tombol jika sinyal aktif
+    send_telegram(chat_id, msg, reply_markup={
+        "inline_keyboard": [[{
+            "text": button["text"],
+            "url": button["url"]
+        }]]
+    })
+
+return "ok", 200
+
 
 # --- Start App ---
 if __name__ == "__main__":
