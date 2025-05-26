@@ -281,7 +281,7 @@ def webhook_token(token):
         }]]
     })
 
-return "ok", 200
+    return "ok", 200
 
 # --- Start App ---
 if __name__ == "__main__":
