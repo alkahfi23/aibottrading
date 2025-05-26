@@ -22,10 +22,17 @@ last_request_time = defaultdict(float)
 RATE_LIMIT_SECONDS = 60
 
 # --- Telegram ---
-def send_telegram(chat_id, message):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": chat_id, "text": message, "parse_mode": "Markdown"}
-    requests.post(url, data=payload)
+def send_telegram(chat_id, message, parse_mode="Markdown", reply_markup=None):
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": chat_id,
+        "text": message,
+        "parse_mode": parse_mode,
+    }
+    if reply_markup:
+        payload["reply_markup"] = json.dumps(reply_markup)
+
+    requests.post(url, json=payload)
 
 def send_telegram_photo(chat_id, image_bytes, caption=""):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
