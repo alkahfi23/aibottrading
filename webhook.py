@@ -234,16 +234,16 @@ def webhook_token(token):
     # --- Handle Signal Analysis ---
     symbol = text.upper()
     if not is_valid_futures_symbol(symbol):
-    send_telegram(chat_id, f"⚠️ Symbol `{symbol}` tidak ditemukan.")
+           send_telegram(chat_id, f"⚠️ Symbol `{symbol}` tidak ditemukan.")
     return "ok", 200
 
     signal, price_now, levels, confidence, supports, resistances = analyze_signal(symbol)
 
-if signal == "NONE":
-    send_telegram(chat_id, f"⚠️ Tidak ada sinyal jelas untuk {symbol}.")
-else:
-    prox_support = [s for s in supports if abs(price_now - s) / price_now < 0.005]
-    prox_resistance = [r for r in resistances if abs(price_now - r) / price_now < 0.005]
+    if signal == "NONE":
+         send_telegram(chat_id, f"⚠️ Tidak ada sinyal jelas untuk {symbol}.")
+    else:
+        prox_support = [s for s in supports if abs(price_now - s) / price_now < 0.005]
+        prox_resistance = [r for r in resistances if abs(price_now - r) / price_now < 0.005]
 
     # Pesan Entry
     if signal == "LONG":
@@ -281,7 +281,7 @@ else:
         }]]
     })
 
-    return "ok", 200
+return "ok", 200
 
 # --- Start App ---
 if __name__ == "__main__":
