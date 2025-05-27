@@ -6,6 +6,6 @@ pandas
 matplotlib
 mplfinance
 python-dotenv
-openai
-ta
-telegram-bot
+python-telegram-bot==20.6
+ta==0.10.2
+
