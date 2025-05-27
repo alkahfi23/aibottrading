@@ -8,6 +8,7 @@ import telebot
 from datetime import datetime
 from binance.client import Client
 from io import BytesIO
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 app = Flask(__name__)
 
@@ -18,7 +19,6 @@ BINANCE_API_SECRET = os.getenv("BINANCE_API_SECRET")
 
 client = Client(BINANCE_API_KEY, BINANCE_API_SECRET)
 
-# Fungsi ambil data OHLC
 def get_klines(symbol, interval=Client.KLINE_INTERVAL_5MINUTE, limit=100):
     try:
         raw = client.get_klines(symbol=symbol, interval=interval, limit=limit)
@@ -35,7 +35,6 @@ def get_klines(symbol, interval=Client.KLINE_INTERVAL_5MINUTE, limit=100):
         print(f"Error get_klines: {e}")
         return None
 
-# Fungsi analisa
 def analyze_pair(symbol):
     df = get_klines(symbol)
     if df is None:
@@ -101,12 +100,8 @@ def analyze_pair(symbol):
 🛡️ Stop Loss: {sl}
 🎯 Take Profit: {tp}
 """
-    if signal != "NONE":
-        result += f"\n📍 [Buka Binance {symbol}](https://www.binance.com/en/futures/{symbol})"
-
     return result.strip(), signal
 
-# Fungsi chart
 def generate_chart(symbol):
     df = get_klines(symbol)
     if df is None:
@@ -136,7 +131,6 @@ def generate_chart(symbol):
     buf.seek(0)
     return buf
 
-# Webhook Telegram
 @app.route('/webhook', methods=['POST'])
 def webhook():
     data = request.get_json()
@@ -153,11 +147,20 @@ def webhook():
                     chart = generate_chart(text)
                     if chart:
                         TELEGRAM_BOT.send_photo(chat_id, chart)
+
+                    # Tombol menuju aplikasi Binance
+                    markup = InlineKeyboardMarkup()
+                    button = InlineKeyboardButton(
+                        text=f"Buka {text} di Binance 📲",
+                        url=f"https://www.binance.com/en/futures/{text}"
+                    )
+                    markup.add(button)
+                    TELEGRAM_BOT.send_message(chat_id, "Klik tombol di bawah untuk buka di aplikasi Binance:", reply_markup=markup)
+
             except Exception as e:
                 TELEGRAM_BOT.send_message(chat_id, f"Error analisis: {e}")
     return "OK"
 
-# Untuk Render
 if __name__ == '__main__':
     port = int(os.getenv("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
