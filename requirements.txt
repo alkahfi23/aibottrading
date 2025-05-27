@@ -7,4 +7,4 @@ matplotlib
 mplfinance
 python-dotenv
 openai
-
+ta
