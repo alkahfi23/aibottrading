@@ -1,19 +1,16 @@
 import os
 import io
-import json
 import numpy as np
 import pandas as pd
 import requests
 import ta
 from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup, ParseMode
-from telegram.constants import ParseMode
 from flask import Flask, request
 import matplotlib.pyplot as plt
-from datetime import datetime
 
 app = Flask(__name__)
 
-TOKEN = os.getenv("BOT_TOKEN")  # Set di Railway sebagai variabel lingkungan
+TOKEN = os.getenv("BOT_TOKEN")  # Diset di Railway
 bot = Bot(token=TOKEN)
 
 # === Utility Functions ===
@@ -100,7 +97,7 @@ def plot_chart(df, symbol):
     buf.seek(0)
     return buf
 
-# === Route Handler ===
+# === Webhook Handler ===
 @app.route(f"/{TOKEN}", methods=["POST"])
 def webhook():
     data = request.get_json()
@@ -153,6 +150,6 @@ def webhook():
 
     return "ok"
 
-# === App Start ===
+# === App Runner ===
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)))
