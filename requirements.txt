@@ -5,3 +5,4 @@ pandas
 python-telegram-bot
 python-binance
 ta
+pyTelegramBotAPI
