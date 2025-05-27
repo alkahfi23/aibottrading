@@ -5,17 +5,15 @@ import numpy as np
 import pandas as pd
 import requests
 import ta
-from telegram import Bot
-import matplotlib.pyplot as plt
-from flask import Flask, request
-from datetime import datetime
-from matplotlib.dates import DateFormatter
 from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
+from flask import Flask, request
+import matplotlib.pyplot as plt
+from datetime import datetime
 
 app = Flask(__name__)
 
-TOKEN = os.getenv("BOT_TOKEN")
+TOKEN = os.getenv("BOT_TOKEN")  # Set di Railway sebagai variabel lingkungan
 bot = Bot(token=TOKEN)
 
 # === Utility Functions ===
@@ -154,6 +152,7 @@ def webhook():
             bot.send_message(chat_id, f"❌ Error: {str(e)}")
 
     return "ok"
-# --- Start App ---
+
+# === App Start ===
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)))
