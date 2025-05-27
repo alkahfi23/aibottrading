@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 import requests
 import ta
+from telegram import Bot
 import matplotlib.pyplot as plt
 from flask import Flask, request
 from datetime import datetime
