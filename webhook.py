@@ -1,289 +1,158 @@
 import os
-import requests
-import numpy as np
-import time
-import matplotlib.pyplot as plt
 import io
 import json
+import numpy as np
 import pandas as pd
-import mplfinance as mpf
+import requests
+import ta
+import matplotlib.pyplot as plt
 from flask import Flask, request
-from binance.client import Client
-from collections import defaultdict
+from datetime import datetime
+from matplotlib.dates import DateFormatter
+from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.constants import ParseMode
 
 app = Flask(__name__)
 
-# --- ENV ---
-BINANCE_API_KEY = os.getenv("BINANCE_API_KEY")
-BINANCE_API_SECRET = os.getenv("BINANCE_API_SECRET")
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+TOKEN = os.getenv("BOT_TOKEN")
+bot = Bot(token=TOKEN)
 
-client = Client(BINANCE_API_KEY, BINANCE_API_SECRET)
-last_request_time = defaultdict(float)
-RATE_LIMIT_SECONDS = 60
+# === Utility Functions ===
+def fetch_klines(symbol: str, interval='1m', limit=200):
+    url = f"https://fapi.binance.com/fapi/v1/klines?symbol={symbol.upper()}&interval={interval}&limit={limit}"
+    data = requests.get(url).json()
+    df = pd.DataFrame(data, columns=[
+        'timestamp', 'open', 'high', 'low', 'close', 'volume',
+        'close_time', 'quote_asset_volume', 'number_of_trades',
+        'taker_buy_base_asset_volume', 'taker_buy_quote_asset_volume', 'ignore'
+    ])
+    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+    df.set_index('timestamp', inplace=True)
+    df = df[['open', 'high', 'low', 'close', 'volume']].astype(float)
+    return df
 
-# --- Telegram ---
-def send_telegram(chat_id, message):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": chat_id, "text": message, "parse_mode": "Markdown"}
-    requests.post(url, data=payload)
-
-def send_telegram_photo(chat_id, image_bytes, caption=""):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
-    files = {"photo": ("chart.png", image_bytes)}
-    data = {"chat_id": chat_id, "caption": caption}
-    requests.post(url, files=files, data=data)
-
-# --- Tools ---
-def get_klines(symbol, interval="1m", limit=100):
-    try:
-        return client.futures_klines(symbol=symbol, interval=interval, limit=limit)
-    except:
-        return []
-
-def ema(prices, period):
-    return np.mean(prices[-period:])
-
-def bollinger_bands(prices, period=20, std_dev=2):
-    ma = np.mean(prices[-period:])
-    std = np.std(prices[-period:])
-    return ma + std_dev * std, ma - std_dev * std
-
-def fibonacci_levels(prices):
-    high, low = max(prices), min(prices)
-    diff = high - low
-    return {
-        "0.236": high - diff * 0.236,
-        "0.382": high - diff * 0.382,
-        "0.5": high - diff * 0.5,
-        "0.618": high - diff * 0.618,
+def generate_fibonacci_levels(df):
+    max_price = df['high'][-50:].max()
+    min_price = df['low'][-50:].min()
+    diff = max_price - min_price
+    levels = {
+        '0.0': max_price,
+        '0.236': max_price - 0.236 * diff,
+        '0.382': max_price - 0.382 * diff,
+        '0.5': max_price - 0.5 * diff,
+        '0.618': max_price - 0.618 * diff,
+        '0.786': max_price - 0.786 * diff,
+        '1.0': min_price,
     }
+    return levels
 
-def find_support_demand_levels(prices, window=5, threshold=0.01, min_distance=0.015):
-    supports = []
-    resistances = []
+def analyze_signal(df):
+    df['ema'] = ta.trend.ema_indicator(df['close'], window=20)
+    df['macd'] = ta.trend.macd_diff(df['close'])
+    df['rsi'] = ta.momentum.rsi(df['close'])
+    df['adx'] = ta.trend.adx(df['high'], df['low'], df['close'])
 
-    for i in range(window, len(prices) - window):
-        is_support = all(prices[i] < prices[j] for j in range(i - window, i + window + 1) if j != i)
-        is_resistance = all(prices[i] > prices[j] for j in range(i - window, i + window + 1) if j != i)
+    last = df.iloc[-1]
+    if (
+        last['close'] > last['ema'] and
+        last['macd'] > 0 and
+        last['rsi'] > 50 and
+        last['adx'] > 20
+    ):
+        return "LONG"
+    elif (
+        last['close'] < last['ema'] and
+        last['macd'] < 0 and
+        last['rsi'] < 50 and
+        last['adx'] > 20
+    ):
+        return "SHORT"
+    return "NONE"
 
-        if is_support:
-            if not any(abs(prices[i] - s) / prices[i] < min_distance for s in supports):
-                supports.append(prices[i])
-        if is_resistance:
-            if not any(abs(prices[i] - r) / prices[i] < min_distance for r in resistances):
-                resistances.append(prices[i])
+def estimate_direction(df):
+    df['return'] = df['close'].pct_change()
+    mean_ret = df['return'].mean()
+    return "UP" if mean_ret > 0 else "DOWN"
 
-    return sorted(supports), sorted(resistances)
-
-
-def is_valid_futures_symbol(symbol):
-    try:
-        info = client.futures_exchange_info()
-        return symbol.upper() in [s["symbol"] for s in info["symbols"]]
-    except:
-        return False
-
-def analyze_signal(symbol):
-    trend = {"LONG": 0, "SHORT": 0}
-    levels = {}
-    price_now = 0
-    support_levels = []
-    resistance_levels = []
-
-    for tf in ["1m", "5m", "15m", "1h"]:
-        klines = get_klines(symbol, tf)
-        if not klines:
-            continue
-        closes = [float(k[4]) for k in klines]
-        price_now = closes[-1]
-        ema4 = ema(closes, 4)
-        ema20 = ema(closes, 20)
-
-        if ema4 > ema20 and price_now > ema20:
-            trend["LONG"] += 1
-        elif ema4 < ema20 and price_now < ema20:
-            trend["SHORT"] += 1
-
-        if tf == "1h":
-            levels = fibonacci_levels(closes)
-            support_levels, resistance_levels = find_support_demand_levels(closes)
-
-    signal = "LONG" if trend["LONG"] >= 2 else "SHORT" if trend["SHORT"] >= 2 else "NONE"
-    confidence = max(trend["LONG"], trend["SHORT"]) / 4
-    return signal, price_now, levels, confidence, support_levels, resistance_levels
-
-def get_active_futures_pairs():
-    try:
-        info = client.futures_exchange_info()
-        return [s["symbol"] for s in info["symbols"] if s["contractType"] == "PERPETUAL" and s["symbol"].endswith("USDT")]
-    except:
-        return []
-
-def get_top_volume_pairs():
-    try:
-        tickers = client.futures_ticker()
-        usdt_pairs = [t for t in tickers if t["symbol"].endswith("USDT")]
-        sorted_by_vol = sorted(usdt_pairs, key=lambda x: float(x["quoteVolume"]), reverse=True)
-        return [x["symbol"] for x in sorted_by_vol[:10]]
-    except:
-        return []
-
-def detect_support_resistance():
-    support = []
-    resistance = []
-    pairs = get_active_futures_pairs()
-    for symbol in pairs:
-        klines = get_klines(symbol, "1h")
-        if not klines:
-            continue
-        closes = [float(k[4]) for k in klines]
-        fibo = fibonacci_levels(closes)
-        price = closes[-1]
-
-        if abs(price - fibo["0.618"]) / price < 0.003:
-            support.append((symbol, price, fibo["0.618"]))
-        if abs(price - fibo["0.236"]) / price < 0.003:
-            resistance.append((symbol, price, fibo["0.236"]))
+def find_support_resistance(df):
+    support = df['low'][-50:].min()
+    resistance = df['high'][-50:].max()
     return support, resistance
 
-def plot_candlestick_fibonacci_chart(symbol):
-    klines = get_klines(symbol, "1h", 100)
-    if not klines:
-        return None
-    data = [[pd.to_datetime(k[0], unit='ms'), float(k[1]), float(k[2]), float(k[3]), float(k[4])] for k in klines]
-    df = pd.DataFrame(data, columns=["Date", "Open", "High", "Low", "Close"]).set_index("Date")
+def volume_spike(df):
+    avg_vol = df['volume'][:-1].mean()
+    last_vol = df['volume'].iloc[-1]
+    return last_vol > avg_vol * 1.5
 
-    fibo = fibonacci_levels(df["Close"].values)
-    prices_fibo = list(fibo.values())
-    colors_fibo = ["g", "b", "r", "y"]
+def plot_chart(df, symbol):
+    levels = generate_fibonacci_levels(df)
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ax.plot(df.index, df['close'], label='Close')
+    for label, level in levels.items():
+        ax.axhline(level, linestyle='--', alpha=0.5, label=f"Fib {label}")
+    ax.set_title(f"{symbol} Chart with Fibonacci")
+    ax.legend()
+    ax.grid(True)
+    plt.xticks(rotation=45)
+    fig.tight_layout()
 
-    fig, axlist = mpf.plot(df, type='candle', style='charles', hlines=dict(
-        hlines=prices_fibo, colors=colors_fibo, linestyle='--', linewidths=1, alpha=0.7
-    ), returnfig=True, title=f"{symbol} 1h Candlestick + Fibonacci", figsize=(10, 6))
-
-    for price, level, color in zip(prices_fibo, fibo.keys(), colors_fibo):
-        axlist[0].text(df.index[-1], price, f"Fib {level}", color=color, fontsize=9,
-                       verticalalignment='bottom', horizontalalignment='right',
-                       backgroundcolor='white', alpha=0.6)
-
-    fig.text(0.5, 0.95, "Signal Future Pro", fontsize=14, color="gray", ha="center", va="top", alpha=0.3, fontweight='bold')
     buf = io.BytesIO()
-    fig.savefig(buf, format="png")
+    plt.savefig(buf, format='png')
     buf.seek(0)
-    plt.close(fig)
     return buf
 
-# --- Webhook ---
-@app.route("/<path:token>", methods=["GET", "POST"])
-def webhook_token(token):
-    if token != TELEGRAM_TOKEN:
-        return "Unauthorized", 403
-    if request.method == "GET":
-        return "OK", 200
-
+# === Route Handler ===
+@app.route(f"/{TOKEN}", methods=["POST"])
+def webhook():
     data = request.get_json()
     if "message" not in data:
-        return "ok", 200
+        return "ok"
+    msg = data["message"]
+    chat_id = msg["chat"]["id"]
+    text = msg.get("text", "")
+    cmd = text.upper().split()
 
-    chat_id = data["message"]["chat"]["id"]
-    text = data["message"].get("text", "").strip().upper()
+    if len(cmd) >= 2:
+        command = cmd[0]
+        symbol = cmd[1].upper()
 
-    if text == "PAIRS":
-        pairs = get_active_futures_pairs()
-        send_telegram(chat_id, "✅ Pair Binance Futures:\n" + ", ".join(pairs[:50]) + "...")
-        return "ok", 200
+        try:
+            df = fetch_klines(symbol)
 
-    if text == "PAIRSVOL":
-        pairs = get_top_volume_pairs()
-        msg = "🔥 Top 10 Pair Berdasarkan Volume:\n" + "\n".join(pairs) if pairs else "⚠️ Gagal mengambil data volume."
-        send_telegram(chat_id, msg)
-        return "ok", 200
+            if command == "CHART":
+                chart = plot_chart(df, symbol)
+                bot.send_photo(chat_id, photo=chart)
 
-    if text == "PAIRSUP" or text == "PAIREST":
-        support, resistance = detect_support_resistance()
-        if text == "PAIRSUP":
-            msg = "🟢 Pair Dekat Support (±0.3% dari Fib 0.618):\n" + "\n".join(
-                [f"• {s[0]}: {s[1]:.2f} (Support: {s[2]:.2f})" for s in support]) or "Tidak ada."
-        else:
-            msg = "🔴 Pair Dekat Resistance (±0.3% dari Fib 0.236):\n" + "\n".join(
-                [f"• {s[0]}: {s[1]:.2f} (Resistance: {s[2]:.2f})" for s in resistance]) or "Tidak ada."
-        send_telegram(chat_id, msg)
-        return "ok", 200
+            elif command == "PAIR":
+                signal = analyze_signal(df)
+                text = f"🔍 *Signal for {symbol}*\nStatus: *{signal}*"
 
-    if text.startswith("CHART "):
-        symbol = text.split(" ")[1]
-        if not is_valid_futures_symbol(symbol):
-            send_telegram(chat_id, f"⚠️ Symbol {symbol} tidak ditemukan.")
-        else:
-            img = plot_candlestick_fibonacci_chart(symbol)
-            if img:
-                send_telegram_photo(chat_id, img, caption=f"📊 Chart {symbol} + Fibonacci Support/Resistance")
-            else:
-                send_telegram(chat_id, "⚠️ Gagal mengambil data chart.")
-        return "ok", 200
+                if signal in ["LONG", "SHORT"]:
+                    keyboard = InlineKeyboardMarkup([
+                        [InlineKeyboardButton("🔗 Open in Binance Futures", url=f"https://www.binance.com/en/futures/{symbol}")]
+                    ])
+                    bot.send_message(chat_id, text, parse_mode=ParseMode.MARKDOWN, reply_markup=keyboard)
+                else:
+                    bot.send_message(chat_id, text, parse_mode=ParseMode.MARKDOWN)
 
-    if not text.isalnum() or len(text) < 6:
-        return "ok", 200
+            elif command == "PAIRVOL":
+                spike = volume_spike(df)
+                msg = f"📈 Volume Spike: {'Yes 🚨' if spike else 'No'}"
+                bot.send_message(chat_id, msg)
 
-    now = time.time()
-    if now - last_request_time[chat_id] < RATE_LIMIT_SECONDS:
-        send_telegram(chat_id, "⏳ Tunggu sebentar ya, coba lagi 1 menit lagi.")
-        return "ok", 200
-    last_request_time[chat_id] = now
+            elif command == "PAIREST":
+                direction = estimate_direction(df)
+                bot.send_message(chat_id, f"📊 Estimated Direction: *{direction}*", parse_mode=ParseMode.MARKDOWN)
 
-    # --- Handle Signal Analysis ---
-    symbol = text.upper()
-    if not is_valid_futures_symbol(symbol):
-           send_telegram(chat_id, f"⚠️ Symbol {symbol} tidak ditemukan.")
-    return "ok", 200
+            elif command == "PAIRSSUP":
+                support, resistance = find_support_resistance(df)
+                msg = f"📉 Support: `{support:.2f}`\n📈 Resistance: `{resistance:.2f}`"
+                bot.send_message(chat_id, msg, parse_mode=ParseMode.MARKDOWN)
 
-    signal, price_now, levels, confidence, supports, resistances = analyze_signal(symbol)
+        except Exception as e:
+            bot.send_message(chat_id, f"❌ Error: {str(e)}")
 
-    if signal == "NONE":
-         send_telegram(chat_id, f"⚠️ Tidak ada sinyal jelas untuk {symbol}.")
-    else:
-        prox_support = [s for s in supports if abs(price_now - s) / price_now < 0.005]
-        prox_resistance = [r for r in resistances if abs(price_now - r) / price_now < 0.005]
-
-    # Pesan Entry
-    if signal == "LONG":
-        entry_msg = "💡 Harga dekat support." if prox_support else "⚠️ Dekat resistance." if prox_resistance else "💡 Sinyal LONG aktif."
-    else:
-        entry_msg = "💡 Harga dekat resistance." if prox_resistance else "⚠️ Dekat support." if prox_support else "💡 Sinyal SHORT aktif."
-
-    # Tautan langsung ke chart Binance Futures
-    binance_link = f"https://www.binance.com/en/futures/{symbol}"
-    button = {
-        "text": f"BUKA {symbol} di Binance",
-        "url": binance_link
-    }
-
-    # Format pesan
-    msg = (
-        f"📊 *Analisis Sinyal untuk {symbol}*\n"
-        f"➡️ *Sinyal:* {signal}\n"
-        f"➡️ *Harga Saat Ini:* {price_now:.2f}\n"
-        f"➡️ *Confidence:* {confidence*100:.1f}%\n\n"
-        f"🔹 *Level Fibonacci:*\n" + "\n".join([f"  - {k}: {v:.2f}" for k, v in levels.items()]) +
-        "\n\n" +
-        (f"🟢 *Support:*\n" + ", ".join(f"{s:.2f}" for s in supports) if supports else "🟢 Tidak ada support.") +
-        "\n" +
-        (f"🔴 *Resistance:*\n" + ", ".join(f"{r:.2f}" for r in resistances) if resistances else "🔴 Tidak ada resistance.") +
-        "\n\n" +
-        f"{entry_msg}"
-    )
-
-    # Kirim dengan tombol jika sinyal aktif
-    send_telegram(chat_id, msg, reply_markup={
-        "inline_keyboard": [[{
-            "text": button["text"],
-            "url": button["url"]
-        }]]
-    })
-
-    return "ok", 200
-
+    return "ok"
 # --- Start App ---
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)))
