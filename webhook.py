@@ -1,155 +1,162 @@
-import os
-import io
-import numpy as np
-import pandas as pd
-import requests
-import ta
-from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup, ParseMode
 from flask import Flask, request
+import os
 import matplotlib.pyplot as plt
+import mplfinance as mpf
+import pandas as pd
+import ta
+import telebot
+from datetime import datetime, timedelta
+from binance.client import Client
+from io import BytesIO
 
 app = Flask(__name__)
 
-TOKEN = os.getenv("BOT_TOKEN")  # Diset di Railway
-bot = Bot(token=TOKEN)
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TELEGRAM_BOT = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
+BINANCE_API_KEY = os.getenv("BINANCE_API_KEY")
+BINANCE_API_SECRET = os.getenv("BINANCE_API_SECRET")
 
-# === Utility Functions ===
-def fetch_klines(symbol: str, interval='1m', limit=200):
-    url = f"https://fapi.binance.com/fapi/v1/klines?symbol={symbol.upper()}&interval={interval}&limit={limit}"
-    data = requests.get(url).json()
-    df = pd.DataFrame(data, columns=[
-        'timestamp', 'open', 'high', 'low', 'close', 'volume',
-        'close_time', 'quote_asset_volume', 'number_of_trades',
-        'taker_buy_base_asset_volume', 'taker_buy_quote_asset_volume', 'ignore'
-    ])
-    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-    df.set_index('timestamp', inplace=True)
-    df = df[['open', 'high', 'low', 'close', 'volume']].astype(float)
-    return df
+client = Client(BINANCE_API_KEY, BINANCE_API_SECRET)
 
-def generate_fibonacci_levels(df):
-    max_price = df['high'][-50:].max()
-    min_price = df['low'][-50:].min()
-    diff = max_price - min_price
-    levels = {
-        '0.0': max_price,
-        '0.236': max_price - 0.236 * diff,
-        '0.382': max_price - 0.382 * diff,
-        '0.5': max_price - 0.5 * diff,
-        '0.618': max_price - 0.618 * diff,
-        '0.786': max_price - 0.786 * diff,
-        '1.0': min_price,
-    }
-    return levels
+# Fungsi analisa lengkap pair
+def analyze_pair(symbol):
+    df = get_klines(symbol, interval=Client.KLINE_INTERVAL_5MINUTE, limit=100)
+    if df is None:
+        return "Data tidak tersedia."
 
-def analyze_signal(df):
-    df['ema'] = ta.trend.ema_indicator(df['close'], window=20)
-    df['macd'] = ta.trend.macd_diff(df['close'])
-    df['rsi'] = ta.momentum.rsi(df['close'])
-    df['adx'] = ta.trend.adx(df['high'], df['low'], df['close'])
-
+    # Hitung indikator teknikal
+    df['EMA20'] = ta.trend.ema_indicator(df['close'], window=20)
+    df['EMA50'] = ta.trend.ema_indicator(df['close'], window=50)
+    df['RSI'] = ta.momentum.rsi(df['close'], window=14)
+    macd = ta.trend.MACD(df['close'])
+    df['MACD'] = macd.macd()
+    df['MACD_SIGNAL'] = macd.macd_signal()
+    df['ADX'] = ta.trend.adx(df['high'], df['low'], df['close'], window=14)
+    bb = ta.volatility.BollingerBands(df['close'])
+    df['BB_H'] = bb.bollinger_hband()
+    df['BB_L'] = bb.bollinger_lband()
+    
     last = df.iloc[-1]
-    if (
-        last['close'] > last['ema'] and
-        last['macd'] > 0 and
-        last['rsi'] > 50 and
-        last['adx'] > 20
-    ):
-        return "LONG"
-    elif (
-        last['close'] < last['ema'] and
-        last['macd'] < 0 and
-        last['rsi'] < 50 and
-        last['adx'] > 20
-    ):
-        return "SHORT"
-    return "NONE"
+    current_price = round(last['close'], 2)
+    
+    # Support dan Resistance (dari harga terendah dan tertinggi)
+    support = round(df['low'][-20:].min(), 2)
+    resistance = round(df['high'][-20:].max(), 2)
 
-def estimate_direction(df):
-    df['return'] = df['close'].pct_change()
-    mean_ret = df['return'].mean()
-    return "UP" if mean_ret > 0 else "DOWN"
+    # Volume spike detection
+    avg_volume = df['volume'].rolling(window=20).mean()
+    volume_spike = last['volume'] > avg_volume.iloc[-1] * 1.5
 
-def find_support_resistance(df):
-    support = df['low'][-50:].min()
-    resistance = df['high'][-50:].max()
-    return support, resistance
+    # Sinyal teknikal
+    trend = "Bullish" if last['EMA20'] > last['EMA50'] else "Bearish"
+    rsi_status = f"{round(last['RSI'],1)} (Overbought)" if last['RSI'] > 70 else f"{round(last['RSI'],1)} (Oversold)" if last['RSI'] < 30 else f"{round(last['RSI'],1)} (Netral)"
+    macd_signal = "✅ Bullish Crossover" if last['MACD'] > last['MACD_SIGNAL'] else "❌ Bearish Crossover"
+    adx_strength = round(last['ADX'],1)
+    bb_status = "Breakout atas" if last['close'] > last['BB_H'] else "Breakout bawah" if last['close'] < last['BB_L'] else "Dalam band"
 
-def volume_spike(df):
-    avg_vol = df['volume'][:-1].mean()
-    last_vol = df['volume'].iloc[-1]
-    return last_vol > avg_vol * 1.5
+    # Validasi sinyal akhir
+    signal = "NONE"
+    if trend == "Bullish" and last['MACD'] > last['MACD_SIGNAL'] and last['RSI'] > 50:
+        signal = "LONG"
+    elif trend == "Bearish" and last['MACD'] < last['MACD_SIGNAL'] and last['RSI'] < 50:
+        signal = "SHORT"
 
-def plot_chart(df, symbol):
-    levels = generate_fibonacci_levels(df)
-    fig, ax = plt.subplots(figsize=(10, 5))
-    ax.plot(df.index, df['close'], label='Close')
-    for label, level in levels.items():
-        ax.axhline(level, linestyle='--', alpha=0.5, label=f"Fib {label}")
-    ax.set_title(f"{symbol} Chart with Fibonacci")
-    ax.legend()
-    ax.grid(True)
-    plt.xticks(rotation=45)
-    fig.tight_layout()
+    # Entry & SL/TP
+    if signal == "LONG":
+        entry = current_price
+        sl = support
+        tp = resistance
+    elif signal == "SHORT":
+        entry = current_price
+        sl = resistance
+        tp = support
+    else:
+        entry = sl = tp = "-"
 
-    buf = io.BytesIO()
-    plt.savefig(buf, format='png')
+    result = f"""
+📊 Pair: {symbol}
+💰 Harga Terkini: ${current_price}
+📈 Trend: {trend}
+📍 Support: ${support}
+📍 Resistance: ${resistance}
+📉 Volume Spike: {'Aktif 🚨' if volume_spike else 'Tidak'}
+📌 RSI: {rsi_status}
+📌 MACD: {macd_signal}
+📌 ADX: {adx_strength}
+📌 EMA20 vs EMA50: {'Golden Cross' if trend == 'Bullish' else 'Death Cross'}
+📊 Bollinger Bands: {bb_status}
+
+📤 Sinyal Validasi Akhir: {'✅ ' + signal if signal != 'NONE' else '⛔ Tidak ada sinyal valid'}
+🎯 Saran Entry: {entry}
+🛡️ Stop Loss: {sl}
+🎯 Take Profit: {tp}
+"""
+
+    if signal in ["LONG", "SHORT"]:
+        result += f"\n📍 [Buka Binance {symbol}](https://www.binance.com/en/futures/{symbol})"
+
+    return result.strip(), signal
+
+# Fungsi chart
+import ccxt
+
+def get_klines(symbol, interval="5m", limit=100):
+    try:
+        binance = ccxt.binance()
+        bars = binance.fetch_ohlcv(symbol.replace("/", ""), timeframe=interval, limit=limit)
+        df = pd.DataFrame(bars, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+        df.set_index('timestamp', inplace=True)
+        return df
+    except Exception as e:
+        print(f"Error get_klines: {e}")
+        return None
+
+def generate_chart(symbol):
+    df = get_klines(symbol, interval="5m", limit=100)
+    if df is None:
+        return None
+
+    df['EMA20'] = ta.trend.ema_indicator(df['close'], window=20)
+    df['EMA50'] = ta.trend.ema_indicator(df['close'], window=50)
+    addplot = [
+        mpf.make_addplot(df['EMA20'], color='green'),
+        mpf.make_addplot(df['EMA50'], color='red')
+    ]
+
+    fig, ax = mpf.plot(
+        df,
+        type='candle',
+        style='yahoo',
+        addplot=addplot,
+        volume=True,
+        returnfig=True,
+        figsize=(8,6),
+        title=f"{symbol} - 5m"
+    )
+
+    buf = BytesIO()
+    fig.savefig(buf, format="png")
     buf.seek(0)
     return buf
 
-# === Webhook Handler ===
-@app.route(f"/{TOKEN}", methods=["POST"])
+@app.route('/webhook', methods=['POST'])
 def webhook():
     data = request.get_json()
-    if "message" not in data:
-        return "ok"
-    msg = data["message"]
-    chat_id = msg["chat"]["id"]
-    text = msg.get("text", "")
-    cmd = text.upper().split()
+    if "message" in data and "text" in data["message"]:
+        text = data["message"]["text"].strip().upper()
+        chat_id = data["message"]["chat"]["id"]
 
-    if len(cmd) >= 2:
-        command = cmd[0]
-        symbol = cmd[1].upper()
+        if len(text) >= 6:  # Asumsi ini adalah pair
+            try:
+                message, signal = analyze_pair(text)
+                TELEGRAM_BOT.send_message(chat_id, message, parse_mode="Markdown")
 
-        try:
-            df = fetch_klines(symbol)
+                if signal != "NONE":
+                    chart = generate_chart(text)
+                    if chart:
+                        TELEGRAM_BOT.send_photo(chat_id, chart)
+            except Exception as e:
+                TELEGRAM_BOT.send_message(chat_id, f"Error analisis: {e}")
 
-            if command == "CHART":
-                chart = plot_chart(df, symbol)
-                bot.send_photo(chat_id, photo=chart)
-
-            elif command == "PAIR":
-                signal = analyze_signal(df)
-                text = f"🔍 *Signal for {symbol}*\nStatus: *{signal}*"
-
-                if signal in ["LONG", "SHORT"]:
-                    keyboard = InlineKeyboardMarkup([
-                        [InlineKeyboardButton("🔗 Open in Binance Futures", url=f"https://www.binance.com/en/futures/{symbol}")]
-                    ])
-                    bot.send_message(chat_id, text, parse_mode=ParseMode.MARKDOWN, reply_markup=keyboard)
-                else:
-                    bot.send_message(chat_id, text, parse_mode=ParseMode.MARKDOWN)
-
-            elif command == "PAIRVOL":
-                spike = volume_spike(df)
-                msg = f"📈 Volume Spike: {'Yes 🚨' if spike else 'No'}"
-                bot.send_message(chat_id, msg)
-
-            elif command == "PAIREST":
-                direction = estimate_direction(df)
-                bot.send_message(chat_id, f"📊 Estimated Direction: *{direction}*", parse_mode=ParseMode.MARKDOWN)
-
-            elif command == "PAIRSSUP":
-                support, resistance = find_support_resistance(df)
-                msg = f"📉 Support: `{support:.2f}`\n📈 Resistance: `{resistance:.2f}`"
-                bot.send_message(chat_id, msg, parse_mode=ParseMode.MARKDOWN)
-
-        except Exception as e:
-            bot.send_message(chat_id, f"❌ Error: {str(e)}")
-
-    return "ok"
-
-# === App Runner ===
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)))
+    return "OK"
