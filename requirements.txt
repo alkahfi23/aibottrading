@@ -8,3 +8,4 @@ mplfinance
 python-dotenv
 openai
 ta
+telegram-bot
