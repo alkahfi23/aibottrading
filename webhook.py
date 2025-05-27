@@ -4,9 +4,9 @@ import numpy as np
 import time
 import matplotlib.pyplot as plt
 import io
+import json
 import pandas as pd
 import mplfinance as mpf
-import json
 from flask import Flask, request
 from binance.client import Client
 from collections import defaultdict
@@ -23,16 +23,10 @@ last_request_time = defaultdict(float)
 RATE_LIMIT_SECONDS = 60
 
 # --- Telegram ---
-def send_telegram(chat_id, message, parse_mode="Markdown", reply_markup=None):
+def send_telegram(chat_id, message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": chat_id,
-        "text": message,
-        "parse_mode": parse_mode,
-    }
-    if reply_markup:
-        payload["reply_markup"] = json.dumps(reply_markup)
-    requests.post(url, json=payload)
+    payload = {"chat_id": chat_id, "text": message, "parse_mode": "Markdown"}
+    requests.post(url, data=payload)
 
 def send_telegram_photo(chat_id, image_bytes, caption=""):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
@@ -81,6 +75,7 @@ def find_support_demand_levels(prices, window=5, threshold=0.01, min_distance=0.
                 resistances.append(prices[i])
 
     return sorted(supports), sorted(resistances)
+
 
 def is_valid_futures_symbol(symbol):
     try:
@@ -193,12 +188,6 @@ def webhook_token(token):
 
     chat_id = data["message"]["chat"]["id"]
     text = data["message"].get("text", "").strip().upper()
-    now = time.time()
-
-    if now - last_request_time.get(chat_id, 0) < RATE_LIMIT_SECONDS:
-        send_telegram(chat_id, "⏳ Tunggu sebentar ya, coba lagi dalam 1 menit.")
-        return "ok", 200
-    last_request_time[chat_id] = now
 
     if text == "PAIRS":
         pairs = get_active_futures_pairs()
@@ -225,7 +214,7 @@ def webhook_token(token):
     if text.startswith("CHART "):
         symbol = text.split(" ")[1]
         if not is_valid_futures_symbol(symbol):
-            send_telegram(chat_id, f"⚠️ Symbol `{symbol}` tidak ditemukan.")
+            send_telegram(chat_id, f"⚠️ Symbol {symbol} tidak ditemukan.")
         else:
             img = plot_candlestick_fibonacci_chart(symbol)
             if img:
@@ -234,17 +223,64 @@ def webhook_token(token):
                 send_telegram(chat_id, "⚠️ Gagal mengambil data chart.")
         return "ok", 200
 
-    # Default: Analisa sinyal
-    if is_valid_futures_symbol(text):
-        signal, price, fibo, conf, sup, res = analyze_signal(text)
-        msg = f"*Sinyal {text}*\n" \
-              f"Harga Sekarang: `{price:.2f}`\n" \
-              f"Sinyal: *{signal}*\n" \
-              f"Confidence: `{conf*100:.0f}%`\n\n" \
-              f"Support: {', '.join([f'{s:.2f}' for s in sup])}\n" \
-              f"Resistance: {', '.join([f'{r:.2f}' for r in res])}\n"
-        send_telegram(chat_id, msg)
+    if not text.isalnum() or len(text) < 6:
         return "ok", 200
+
+    now = time.time()
+    if now - last_request_time[chat_id] < RATE_LIMIT_SECONDS:
+        send_telegram(chat_id, "⏳ Tunggu sebentar ya, coba lagi 1 menit lagi.")
+        return "ok", 200
+    last_request_time[chat_id] = now
+
+    # --- Handle Signal Analysis ---
+    symbol = text.upper()
+    if not is_valid_futures_symbol(symbol):
+           send_telegram(chat_id, f"⚠️ Symbol {symbol} tidak ditemukan.")
+    return "ok", 200
+
+    signal, price_now, levels, confidence, supports, resistances = analyze_signal(symbol)
+
+    if signal == "NONE":
+         send_telegram(chat_id, f"⚠️ Tidak ada sinyal jelas untuk {symbol}.")
+    else:
+        prox_support = [s for s in supports if abs(price_now - s) / price_now < 0.005]
+        prox_resistance = [r for r in resistances if abs(price_now - r) / price_now < 0.005]
+
+    # Pesan Entry
+    if signal == "LONG":
+        entry_msg = "💡 Harga dekat support." if prox_support else "⚠️ Dekat resistance." if prox_resistance else "💡 Sinyal LONG aktif."
+    else:
+        entry_msg = "💡 Harga dekat resistance." if prox_resistance else "⚠️ Dekat support." if prox_support else "💡 Sinyal SHORT aktif."
+
+    # Tautan langsung ke chart Binance Futures
+    binance_link = f"https://www.binance.com/en/futures/{symbol}"
+    button = {
+        "text": f"BUKA {symbol} di Binance",
+        "url": binance_link
+    }
+
+    # Format pesan
+    msg = (
+        f"📊 *Analisis Sinyal untuk {symbol}*\n"
+        f"➡️ *Sinyal:* {signal}\n"
+        f"➡️ *Harga Saat Ini:* {price_now:.2f}\n"
+        f"➡️ *Confidence:* {confidence*100:.1f}%\n\n"
+        f"🔹 *Level Fibonacci:*\n" + "\n".join([f"  - {k}: {v:.2f}" for k, v in levels.items()]) +
+        "\n\n" +
+        (f"🟢 *Support:*\n" + ", ".join(f"{s:.2f}" for s in supports) if supports else "🟢 Tidak ada support.") +
+        "\n" +
+        (f"🔴 *Resistance:*\n" + ", ".join(f"{r:.2f}" for r in resistances) if resistances else "🔴 Tidak ada resistance.") +
+        "\n\n" +
+        f"{entry_msg}"
+    )
+
+    # Kirim dengan tombol jika sinyal aktif
+    send_telegram(chat_id, msg, reply_markup={
+        "inline_keyboard": [[{
+            "text": button["text"],
+            "url": button["url"]
+        }]]
+    })
 
     return "ok", 200
 
