@@ -1,14 +1,7 @@
-flask
-python-binance
-requests
-numpy
-pandas
+Flask
 matplotlib
 mplfinance
-python-dotenv
+pandas
 python-telegram-bot
+python-binance
 ta
-urllib3==1.26.15
-pyTelegramBotAPI
-ccxt
-
