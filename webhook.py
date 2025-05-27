@@ -5,7 +5,6 @@ import mplfinance as mpf
 import pandas as pd
 import ta
 import telebot
-import ccxt
 from datetime import datetime, timedelta
 from binance.client import Client
 from io import BytesIO
