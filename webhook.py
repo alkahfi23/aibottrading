@@ -5,7 +5,7 @@ import mplfinance as mpf
 import pandas as pd
 import ta
 import telebot
-from datetime import datetime, timedelta
+from datetime import datetime
 from binance.client import Client
 from io import BytesIO
 
@@ -18,13 +18,29 @@ BINANCE_API_SECRET = os.getenv("BINANCE_API_SECRET")
 
 client = Client(BINANCE_API_KEY, BINANCE_API_SECRET)
 
-# Fungsi analisa lengkap pair
-def analyze_pair(symbol):
-    df = get_klines(symbol, interval=Client.KLINE_INTERVAL_5MINUTE, limit=100)
-    if df is None:
-        return "Data tidak tersedia."
+# Fungsi ambil data OHLC
+def get_klines(symbol, interval=Client.KLINE_INTERVAL_5MINUTE, limit=100):
+    try:
+        raw = client.get_klines(symbol=symbol, interval=interval, limit=limit)
+        df = pd.DataFrame(raw, columns=[
+            'timestamp', 'open', 'high', 'low', 'close', 'volume',
+            'close_time', 'quote_asset_volume', 'number_of_trades',
+            'taker_buy_base', 'taker_buy_quote', 'ignore'
+        ])
+        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+        df.set_index('timestamp', inplace=True)
+        df = df.astype(float)
+        return df[['open', 'high', 'low', 'close', 'volume']]
+    except Exception as e:
+        print(f"Error get_klines: {e}")
+        return None
 
-    # Hitung indikator teknikal
+# Fungsi analisa
+def analyze_pair(symbol):
+    df = get_klines(symbol)
+    if df is None:
+        return "Data tidak tersedia.", "NONE"
+
     df['EMA20'] = ta.trend.ema_indicator(df['close'], window=20)
     df['EMA50'] = ta.trend.ema_indicator(df['close'], window=50)
     df['RSI'] = ta.momentum.rsi(df['close'], window=14)
@@ -35,33 +51,27 @@ def analyze_pair(symbol):
     bb = ta.volatility.BollingerBands(df['close'])
     df['BB_H'] = bb.bollinger_hband()
     df['BB_L'] = bb.bollinger_lband()
-    
+
     last = df.iloc[-1]
     current_price = round(last['close'], 2)
-    
-    # Support dan Resistance (dari harga terendah dan tertinggi)
     support = round(df['low'][-20:].min(), 2)
     resistance = round(df['high'][-20:].max(), 2)
 
-    # Volume spike detection
     avg_volume = df['volume'].rolling(window=20).mean()
     volume_spike = last['volume'] > avg_volume.iloc[-1] * 1.5
 
-    # Sinyal teknikal
     trend = "Bullish" if last['EMA20'] > last['EMA50'] else "Bearish"
     rsi_status = f"{round(last['RSI'],1)} (Overbought)" if last['RSI'] > 70 else f"{round(last['RSI'],1)} (Oversold)" if last['RSI'] < 30 else f"{round(last['RSI'],1)} (Netral)"
     macd_signal = "✅ Bullish Crossover" if last['MACD'] > last['MACD_SIGNAL'] else "❌ Bearish Crossover"
     adx_strength = round(last['ADX'],1)
     bb_status = "Breakout atas" if last['close'] > last['BB_H'] else "Breakout bawah" if last['close'] < last['BB_L'] else "Dalam band"
 
-    # Validasi sinyal akhir
     signal = "NONE"
     if trend == "Bullish" and last['MACD'] > last['MACD_SIGNAL'] and last['RSI'] > 50:
         signal = "LONG"
     elif trend == "Bearish" and last['MACD'] < last['MACD_SIGNAL'] and last['RSI'] < 50:
         signal = "SHORT"
 
-    # Entry & SL/TP
     if signal == "LONG":
         entry = current_price
         sl = support
@@ -91,29 +101,14 @@ def analyze_pair(symbol):
 🛡️ Stop Loss: {sl}
 🎯 Take Profit: {tp}
 """
-
-    if signal in ["LONG", "SHORT"]:
+    if signal != "NONE":
         result += f"\n📍 [Buka Binance {symbol}](https://www.binance.com/en/futures/{symbol})"
 
     return result.strip(), signal
 
 # Fungsi chart
-import ccxt
-
-def get_klines(symbol, interval="5m", limit=100):
-    try:
-        binance = ccxt.binance()
-        bars = binance.fetch_ohlcv(symbol.replace("/", ""), timeframe=interval, limit=limit)
-        df = pd.DataFrame(bars, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-        df.set_index('timestamp', inplace=True)
-        return df
-    except Exception as e:
-        print(f"Error get_klines: {e}")
-        return None
-
 def generate_chart(symbol):
-    df = get_klines(symbol, interval="5m", limit=100)
+    df = get_klines(symbol)
     if df is None:
         return None
 
@@ -137,9 +132,11 @@ def generate_chart(symbol):
 
     buf = BytesIO()
     fig.savefig(buf, format="png")
+    plt.close(fig)
     buf.seek(0)
     return buf
 
+# Webhook Telegram
 @app.route('/webhook', methods=['POST'])
 def webhook():
     data = request.get_json()
@@ -147,7 +144,7 @@ def webhook():
         text = data["message"]["text"].strip().upper()
         chat_id = data["message"]["chat"]["id"]
 
-        if len(text) >= 6:  # Asumsi ini adalah pair
+        if len(text) >= 6:
             try:
                 message, signal = analyze_pair(text)
                 TELEGRAM_BOT.send_message(chat_id, message, parse_mode="Markdown")
@@ -158,5 +155,9 @@ def webhook():
                         TELEGRAM_BOT.send_photo(chat_id, chart)
             except Exception as e:
                 TELEGRAM_BOT.send_message(chat_id, f"Error analisis: {e}")
-
     return "OK"
+
+# Untuk Render
+if __name__ == '__main__':
+    port = int(os.getenv("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
