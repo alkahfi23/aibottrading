@@ -9,4 +9,5 @@ python-dotenv
 python-telegram-bot
 ta
 urllib3==1.26.15
+pyTelegramBotAPI
 
