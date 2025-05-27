@@ -152,7 +152,7 @@ def webhook():
                     markup = InlineKeyboardMarkup()
                     button = InlineKeyboardButton(
                         text=f"Buka {text} di Binance 📲",
-                        url=f"https://www.binance.com/en/futures/{text}"
+                        url=f"https://www.binance.com/en/futures/{text}?ref=GRO_16987_24H8Y"
                     )
                     markup.add(button)
                     TELEGRAM_BOT.send_message(chat_id, "Klik tombol di bawah untuk buka di aplikasi Binance:", reply_markup=markup)
