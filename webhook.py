@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import requests
 import ta
-from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup, ParseMode
 from telegram.constants import ParseMode
 from flask import Flask, request
 import matplotlib.pyplot as plt
