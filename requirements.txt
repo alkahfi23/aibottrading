@@ -6,7 +6,7 @@ pandas
 matplotlib
 mplfinance
 python-dotenv
-python-telegram-bot==20.3
+python-telegram-bot
 ta
 urllib3==1.26.15
 
