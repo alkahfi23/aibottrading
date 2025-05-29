@@ -95,11 +95,16 @@ def analyze_multi_timeframe(symbol):
 
 📤 Sinyal Final: {'✅ ' + signal if signal != 'NONE' else '⛔ Tidak valid'}
 💰 Harga Saat Ini: ${format_price(current_price)}
+"""
+
+if signal != "NONE":
+    result += f"""
 🎯 Entry (BB 5M): {format_price(entry)}
 🛡️ Stop Loss: {format_price(support)}
 🎯 Take Profit: {format_price(resistance)}
 """
-    return result.strip(), signal
+
+return result.strip(), signal
 
 def generate_chart(symbol, signal_type="NONE"):
     df = get_klines(symbol, interval="1h", limit=100)
