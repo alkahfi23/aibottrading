@@ -42,7 +42,7 @@ def analyze_multi_timeframe(symbol):
     df_5m = get_klines(symbol, interval="5m", limit=100)
 
     if df_4h is None or df_1h is None or df_5m is None:
-        return "📉 Data tidak lengkap untuk analisis multi-timeframe.", "NONE"
+        return "📉 Data tidak lengkap untuk analisis multi-timeframe.", "NONE", None
 
     df_4h['EMA50'] = ta.trend.ema_indicator(df_4h['close'], window=50)
     df_4h['EMA200'] = ta.trend.ema_indicator(df_4h['close'], window=200)
@@ -61,6 +61,9 @@ def analyze_multi_timeframe(symbol):
         signal = "LONG"
     elif long_term_trend == "Bearish" and last_1h['MACD'] < last_1h['MACD_SIGNAL'] and last_1h['RSI'] < 50:
         signal = "SHORT"
+
+    if df_5m.empty:
+        return "⛔ Data 5M kosong.", "NONE", None
 
     bb_5m = ta.volatility.BollingerBands(df_5m['close'])
     df_5m['BB_L'] = bb_5m.bollinger_lband()
@@ -112,12 +115,11 @@ def analyze_multi_timeframe(symbol):
 def generate_chart(symbol, signal_type="NONE", entry_price=None):
     df = get_klines(symbol, interval="1h", limit=100)
     if df is None or df.empty:
+        print("Data kosong untuk generate_chart")
         return None
 
     df['EMA50'] = ta.trend.ema_indicator(df['close'], window=50)
     df['EMA200'] = ta.trend.ema_indicator(df['close'], window=200)
-
-    last_price = df['close'].iloc[-1]
 
     addplot = [
         mpf.make_addplot(df['EMA50'], color='green'),
@@ -126,10 +128,10 @@ def generate_chart(symbol, signal_type="NONE", entry_price=None):
 
     if signal_type == "LONG" and entry_price:
         addplot.append(mpf.make_addplot([np.nan]*(len(df)-1) + [entry_price],
-                                        type='scatter', markersize=100, marker='^', color='green'))
+                                        type='scatter', markersize=200, marker='^', color='green'))
     elif signal_type == "SHORT" and entry_price:
         addplot.append(mpf.make_addplot([np.nan]*(len(df)-1) + [entry_price],
-                                        type='scatter', markersize=100, marker='v', color='red'))
+                                        type='scatter', markersize=200, marker='v', color='red'))
 
     fig, ax = mpf.plot(
         df, type='candle', style='yahoo', addplot=addplot,
