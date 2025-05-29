@@ -28,6 +28,8 @@ POPULAR_SYMBOLS = [
 def get_klines(symbol, interval="5m", limit=100):
     try:
         raw = client.get_klines(symbol=symbol, interval=interval, limit=limit)
+        if not raw:
+            return None
         df = pd.DataFrame(raw, columns=[
             'timestamp', 'open', 'high', 'low', 'close', 'volume',
             'close_time', 'quote_asset_volume', 'number_of_trades',
@@ -137,19 +139,23 @@ def generate_chart(symbol, signal_type="NONE", entry_price=None):
         addplot.append(mpf.make_addplot([np.nan]*(len(df)-1) + [entry_price],
                                         type='scatter', markersize=100, marker='v', color='red'))
 
-    fig, ax = mpf.plot(
-        df, type='candle', style='yahoo', addplot=addplot,
-        volume=True, returnfig=True, figsize=(8, 6),
-        title=f"{symbol} - Signal Future Pro"
-    )
-    ax[0].text(0.02, 0.95, "Signal Future Pro", transform=ax[0].transAxes,
-               fontsize=14, fontweight='bold', color='blue', bbox=dict(facecolor='white', alpha=0.7))
+    try:
+        fig, ax = mpf.plot(
+            df, type='candle', style='yahoo', addplot=addplot,
+            volume=True, returnfig=True, figsize=(8, 6),
+            title=f"{symbol} - Signal Future Pro"
+        )
+        ax[0].text(0.02, 0.95, "Signal Future Pro", transform=ax[0].transAxes,
+                   fontsize=14, fontweight='bold', color='blue', bbox=dict(facecolor='white', alpha=0.7))
 
-    buf = BytesIO()
-    fig.savefig(buf, format="png")
-    plt.close(fig)
-    buf.seek(0)
-    return buf
+        buf = BytesIO()
+        fig.savefig(buf, format="png")
+        plt.close(fig)
+        buf.seek(0)
+        return buf
+    except Exception as e:
+        print(f"Error generate_chart: {e}")
+        return None
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
