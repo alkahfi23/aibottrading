@@ -32,7 +32,6 @@ def get_klines(symbol, interval=Client.KLINE_INTERVAL_5MINUTE, limit=100):
         df = df.astype(float)
         return df[['open', 'high', 'low', 'close', 'volume']]
     except Exception as e:
-        print(f"Error get_klines: {e}")
         return None
 
 def analyze_pair(symbol):
@@ -71,12 +70,11 @@ def analyze_pair(symbol):
     elif trend == "Bearish" and last['MACD'] < last['MACD_SIGNAL'] and last['RSI'] < 50:
         signal = "SHORT"
 
-    # Penyesuaian SL dan TP agar tidak sama dengan entry
     if signal == "LONG":
         entry = current_price
         sl = min(support, entry * 0.98)
         tp = max(resistance, entry * 1.02)
-        if abs(tp - entry) / entry < 0.002:  # <0.2%
+        if abs(tp - entry) / entry < 0.002:
             tp = round(entry * 1.02, 6)
     elif signal == "SHORT":
         entry = current_price
@@ -146,26 +144,32 @@ def webhook():
         text = data["message"]["text"].strip().upper()
         chat_id = data["message"]["chat"]["id"]
 
-        if len(text) >= 6:
-            try:
-                message, signal = analyze_pair(text)
-                TELEGRAM_BOT.send_message(chat_id, message, parse_mode="Markdown")
+        if len(text) < 6 or not text.isalnum():
+            return "Invalid input"
 
-                if signal != "NONE":
-                    chart = generate_chart(text)
-                    if chart:
-                        TELEGRAM_BOT.send_photo(chat_id, chart)
+        df = get_klines(text)
+        if df is None:
+            return "Invalid symbol"
 
-                    markup = InlineKeyboardMarkup()
-                    button = InlineKeyboardButton(
-                        text=f"Buka {text} di Binance 📲",
-                        url=f"https://www.binance.com/en/futures/{text}?ref=GRO_16987_24H8Y"
-                    )
-                    markup.add(button)
-                    TELEGRAM_BOT.send_message(chat_id, "Klik tombol di bawah untuk buka di aplikasi Binance:", reply_markup=markup)
+        try:
+            message, signal = analyze_pair(text)
+            TELEGRAM_BOT.send_message(chat_id, message, parse_mode="Markdown")
 
-            except Exception as e:
-                TELEGRAM_BOT.send_message(chat_id, f"Error analisis: {e}")
+            if signal != "NONE":
+                chart = generate_chart(text)
+                if chart:
+                    TELEGRAM_BOT.send_photo(chat_id, chart)
+
+                markup = InlineKeyboardMarkup()
+                button = InlineKeyboardButton(
+                    text=f"Buka {text} di Binance 📲",
+                    url=f"https://www.binance.com/en/futures/{text}?ref=GRO_16987_24H8Y"
+                )
+                markup.add(button)
+                TELEGRAM_BOT.send_message(chat_id, "Klik tombol di bawah untuk buka di aplikasi Binance:", reply_markup=markup)
+
+        except Exception as e:
+            TELEGRAM_BOT.send_message(chat_id, f"Error analisis: {e}")
     return "OK"
 
 if __name__ == '__main__':
