@@ -13,11 +13,11 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 app = Flask(__name__)
 
-# Load API keys from environment variables
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_BOT = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 BINANCE_API_KEY = os.getenv("BINANCE_API_KEY")
 BINANCE_API_SECRET = os.getenv("BINANCE_API_SECRET")
+
 client = Client(BINANCE_API_KEY, BINANCE_API_SECRET)
 
 def get_klines(symbol, interval="5m", limit=100):
@@ -33,7 +33,7 @@ def get_klines(symbol, interval="5m", limit=100):
         df = df.astype(float)
         return df[['open', 'high', 'low', 'close', 'volume']]
     except Exception as e:
-        print(f"Error get_klines ({interval}): {e}")
+        print(f"❌ Error get_klines ({interval}): {e}")
         return None
 
 def analyze_multi_timeframe(symbol):
@@ -44,12 +44,10 @@ def analyze_multi_timeframe(symbol):
     if df_4h is None or df_1h is None or df_5m is None:
         return "📉 Data tidak lengkap untuk analisis multi-timeframe.", "NONE"
 
-    # EMA Trend 4H
     df_4h['EMA50'] = ta.trend.ema_indicator(df_4h['close'], window=50)
     df_4h['EMA200'] = ta.trend.ema_indicator(df_4h['close'], window=200)
     long_term_trend = "Bullish" if df_4h['EMA50'].iloc[-1] > df_4h['EMA200'].iloc[-1] else "Bearish"
 
-    # RSI, MACD, ADX di 1H
     df_1h['RSI'] = ta.momentum.rsi(df_1h['close'], window=14)
     macd = ta.trend.MACD(df_1h['close'])
     df_1h['MACD'] = macd.macd()
@@ -64,7 +62,6 @@ def analyze_multi_timeframe(symbol):
     elif long_term_trend == "Bearish" and last_1h['MACD'] < last_1h['MACD_SIGNAL'] and last_1h['RSI'] < 50:
         signal = "SHORT"
 
-    # Entry dari BB 5M
     bb_5m = ta.volatility.BollingerBands(df_5m['close'])
     df_5m['BB_L'] = bb_5m.bollinger_lband()
     df_5m['BB_H'] = bb_5m.bollinger_hband()
@@ -90,9 +87,9 @@ def analyze_multi_timeframe(symbol):
 ⏰ TF Utama: 4H | Konfirmasi: 1H | Entry: 5M
 
 📈 Trend 4H: {long_term_trend}
-📌 RSI 1H: {round(last_1h['RSI'], 1)}
+📌 RSI 1H: {round(last_1h['RSI'],1)}
 📌 MACD: {"Bullish" if last_1h['MACD'] > last_1h['MACD_SIGNAL'] else "Bearish"}
-📌 ADX: {round(last_1h['ADX'], 1)}
+📌 ADX: {round(last_1h['ADX'],1)}
 
 📤 Sinyal Final: {'✅ ' + signal if signal != 'NONE' else '⛔ Tidak valid'}
 💰 Harga Saat Ini: ${format_price(current_price)}
@@ -108,40 +105,45 @@ def analyze_multi_timeframe(symbol):
     return result.strip(), signal
 
 def generate_chart(symbol, signal_type="NONE"):
-    df = get_klines(symbol, interval="1h", limit=100)
-    if df is None or df.empty:
+    try:
+        df = get_klines(symbol, interval="1h", limit=100)
+        if df is None or df.empty:
+            print("⚠️ Chart: Data kosong")
+            return None
+
+        df['EMA50'] = ta.trend.ema_indicator(df['close'], window=50)
+        df['EMA200'] = ta.trend.ema_indicator(df['close'], window=200)
+        last_price = df['close'].iloc[-1]
+
+        addplot = [
+            mpf.make_addplot(df['EMA50'], color='green'),
+            mpf.make_addplot(df['EMA200'], color='red')
+        ]
+
+        if signal_type == "LONG":
+            addplot.append(mpf.make_addplot([np.nan]*(len(df)-1) + [last_price * 0.995],
+                                            type='scatter', markersize=100, marker='^', color='green'))
+        elif signal_type == "SHORT":
+            addplot.append(mpf.make_addplot([np.nan]*(len(df)-1) + [last_price * 1.005],
+                                            type='scatter', markersize=100, marker='v', color='red'))
+
+        fig, ax = mpf.plot(
+            df, type='candle', style='yahoo', addplot=addplot,
+            volume=True, returnfig=True, figsize=(8, 6),
+            title=f"{symbol} - Signal Future Pro"
+        )
+        ax[0].text(0.02, 0.95, "Signal Future Pro", transform=ax[0].transAxes,
+                   fontsize=14, fontweight='bold', color='blue',
+                   bbox=dict(facecolor='white', alpha=0.7))
+
+        buf = BytesIO()
+        fig.savefig(buf, format="png")
+        plt.close(fig)
+        buf.seek(0)
+        return buf
+    except Exception as e:
+        print(f"❌ Error generate_chart: {e}")
         return None
-
-    df['EMA50'] = ta.trend.ema_indicator(df['close'], window=50)
-    df['EMA200'] = ta.trend.ema_indicator(df['close'], window=200)
-
-    last_price = df['close'].iloc[-1]
-
-    addplot = [
-        mpf.make_addplot(df['EMA50'], color='green'),
-        mpf.make_addplot(df['EMA200'], color='red')
-    ]
-
-    if signal_type == "LONG":
-        addplot.append(mpf.make_addplot([np.nan]*(len(df)-1) + [last_price * 0.995],
-                                        type='scatter', markersize=100, marker='^', color='green'))
-    elif signal_type == "SHORT":
-        addplot.append(mpf.make_addplot([np.nan]*(len(df)-1) + [last_price * 1.005],
-                                        type='scatter', markersize=100, marker='v', color='red'))
-
-    fig, ax = mpf.plot(
-        df, type='candle', style='yahoo', addplot=addplot,
-        volume=True, returnfig=True, figsize=(8, 6),
-        title=f"{symbol} - Signal Future Pro"
-    )
-    ax[0].text(0.02, 0.95, "Signal Future Pro", transform=ax[0].transAxes,
-               fontsize=14, fontweight='bold', color='blue', bbox=dict(facecolor='white', alpha=0.7))
-
-    buf = BytesIO()
-    fig.savefig(buf, format="png")
-    plt.close(fig)
-    buf.seek(0)
-    return buf
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
@@ -158,17 +160,23 @@ def webhook():
                 if signal != "NONE":
                     chart = generate_chart(text, signal)
                     if chart:
-                        TELEGRAM_BOT.send_photo(chat_id, chart)
+                        try:
+                            TELEGRAM_BOT.send_photo(chat_id, chart)
+                        except Exception as e:
+                            print(f"❌ Error send_photo: {e}")
 
-                    markup = InlineKeyboardMarkup()
-                    button = InlineKeyboardButton(
-                        text=f"Buka {text} di Binance 📲",
-                        url=f"https://www.binance.com/en/futures/{text}?ref=GRO_16987_24H8Y"
-                    )
-                    markup.add(button)
-                    TELEGRAM_BOT.send_message(chat_id, "Klik tombol di bawah untuk buka di aplikasi Binance:", reply_markup=markup)
+                    try:
+                        markup = InlineKeyboardMarkup()
+                        button = InlineKeyboardButton(
+                            text=f"Buka {text} di Binance 📲",
+                            url=f"https://www.binance.com/en/futures/{text}?ref=GRO_16987_24H8Y"
+                        )
+                        markup.add(button)
+                        TELEGRAM_BOT.send_message(chat_id, "Klik tombol di bawah untuk buka di aplikasi Binance:", reply_markup=markup)
+                    except Exception as e:
+                        print(f"❌ Error kirim tombol: {e}")
+
             except Exception as e:
-                print(f"[Webhook Error] {e}")
                 TELEGRAM_BOT.send_message(chat_id, f"Error analisis: {e}")
         else:
             TELEGRAM_BOT.send_message(chat_id, "Format simbol tidak valid atau terlalu pendek.")
