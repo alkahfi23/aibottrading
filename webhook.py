@@ -33,7 +33,7 @@ def get_klines(symbol, interval="5m", limit=100):
         df = df.astype(float)
         return df[['open', 'high', 'low', 'close', 'volume']]
     except Exception as e:
-        print(f"❌ Error get_klines ({interval}): {e}")
+        print(f"Error get_klines ({interval}): {e}")
         return None
 
 def analyze_multi_timeframe(symbol):
@@ -67,17 +67,22 @@ def analyze_multi_timeframe(symbol):
     df_5m['BB_H'] = bb_5m.bollinger_hband()
 
     entry = "-"
+    stop_loss = "-"
+    take_profit = "-"
+
     if signal == "LONG":
         entry = df_5m['BB_L'].iloc[-1]
+        stop_loss = entry * 0.985
+        take_profit = entry + (entry - stop_loss) * 1.5
     elif signal == "SHORT":
         entry = df_5m['BB_H'].iloc[-1]
+        stop_loss = entry * 1.015
+        take_profit = entry - (stop_loss - entry) * 1.5
 
-    support = df_1h['low'][-20:].min()
-    resistance = df_1h['high'][-20:].max()
     current_price = df_1h['close'].iloc[-1]
 
     def format_price(p):
-        if p == "-":
+        if p == "-" or p is None:
             return "-"
         dec = 8 if 'USDT' in symbol else 4
         return f"{p:.{dec}f}"
@@ -88,62 +93,57 @@ def analyze_multi_timeframe(symbol):
 
 📈 Trend 4H: {long_term_trend}
 📌 RSI 1H: {round(last_1h['RSI'],1)}
-📌 MACD: {"Bullish" if last_1h['MACD'] > last_1h['MACD_SIGNAL'] else "Bearish"}
+📌 MACD: {'Bullish' if last_1h['MACD'] > last_1h['MACD_SIGNAL'] else 'Bearish'}
 📌 ADX: {round(last_1h['ADX'],1)}
 
-📤 Sinyal Final: {'✅ ' + signal if signal != 'NONE' else '⛔ Tidak valid'}
+📄 Sinyal Final: {'✅ ' + signal if signal != 'NONE' else '⛔ Tidak valid'}
 💰 Harga Saat Ini: ${format_price(current_price)}
 """
 
     if signal != "NONE":
         result += f"""
 🎯 Entry (BB 5M): {format_price(entry)}
-🛡️ Stop Loss: {format_price(support)}
-🎯 Take Profit: {format_price(resistance)}
+🛡️ Stop Loss: {format_price(stop_loss)}
+🎯 Take Profit: {format_price(take_profit)}
 """
 
-    return result.strip(), signal
+    return result.strip(), signal, entry
 
-def generate_chart(symbol, signal_type="NONE"):
-    try:
-        df = get_klines(symbol, interval="1h", limit=100)
-        if df is None or df.empty:
-            print("⚠️ Chart: Data kosong")
-            return None
-
-        df['EMA50'] = ta.trend.ema_indicator(df['close'], window=50)
-        df['EMA200'] = ta.trend.ema_indicator(df['close'], window=200)
-        last_price = df['close'].iloc[-1]
-
-        addplot = [
-            mpf.make_addplot(df['EMA50'], color='green'),
-            mpf.make_addplot(df['EMA200'], color='red')
-        ]
-
-        if signal_type == "LONG":
-            addplot.append(mpf.make_addplot([np.nan]*(len(df)-1) + [last_price * 0.995],
-                                            type='scatter', markersize=100, marker='^', color='green'))
-        elif signal_type == "SHORT":
-            addplot.append(mpf.make_addplot([np.nan]*(len(df)-1) + [last_price * 1.005],
-                                            type='scatter', markersize=100, marker='v', color='red'))
-
-        fig, ax = mpf.plot(
-            df, type='candle', style='yahoo', addplot=addplot,
-            volume=True, returnfig=True, figsize=(8, 6),
-            title=f"{symbol} - Signal Future Pro"
-        )
-        ax[0].text(0.02, 0.95, "Signal Future Pro", transform=ax[0].transAxes,
-                   fontsize=14, fontweight='bold', color='blue',
-                   bbox=dict(facecolor='white', alpha=0.7))
-
-        buf = BytesIO()
-        fig.savefig(buf, format="png")
-        plt.close(fig)
-        buf.seek(0)
-        return buf
-    except Exception as e:
-        print(f"❌ Error generate_chart: {e}")
+def generate_chart(symbol, signal_type="NONE", entry_price=None):
+    df = get_klines(symbol, interval="1h", limit=100)
+    if df is None or df.empty:
         return None
+
+    df['EMA50'] = ta.trend.ema_indicator(df['close'], window=50)
+    df['EMA200'] = ta.trend.ema_indicator(df['close'], window=200)
+
+    last_price = df['close'].iloc[-1]
+
+    addplot = [
+        mpf.make_addplot(df['EMA50'], color='green'),
+        mpf.make_addplot(df['EMA200'], color='red')
+    ]
+
+    if signal_type == "LONG" and entry_price:
+        addplot.append(mpf.make_addplot([np.nan]*(len(df)-1) + [entry_price],
+                                        type='scatter', markersize=100, marker='^', color='green'))
+    elif signal_type == "SHORT" and entry_price:
+        addplot.append(mpf.make_addplot([np.nan]*(len(df)-1) + [entry_price],
+                                        type='scatter', markersize=100, marker='v', color='red'))
+
+    fig, ax = mpf.plot(
+        df, type='candle', style='yahoo', addplot=addplot,
+        volume=True, returnfig=True, figsize=(8, 6),
+        title=f"{symbol} - Signal Future Pro"
+    )
+    ax[0].text(0.02, 0.95, "Signal Future Pro", transform=ax[0].transAxes,
+               fontsize=14, fontweight='bold', color='blue', bbox=dict(facecolor='white', alpha=0.7))
+
+    buf = BytesIO()
+    fig.savefig(buf, format="png")
+    plt.close(fig)
+    buf.seek(0)
+    return buf
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
@@ -154,28 +154,21 @@ def webhook():
 
         if len(text) >= 6 and text.isalnum():
             try:
-                message, signal = analyze_multi_timeframe(text)
+                message, signal, entry = analyze_multi_timeframe(text)
                 TELEGRAM_BOT.send_message(chat_id, message, parse_mode="Markdown")
 
                 if signal != "NONE":
-                    chart = generate_chart(text, signal)
+                    chart = generate_chart(text, signal, entry)
                     if chart:
-                        try:
-                            TELEGRAM_BOT.send_photo(chat_id, chart)
-                        except Exception as e:
-                            print(f"❌ Error send_photo: {e}")
+                        TELEGRAM_BOT.send_photo(chat_id, chart)
 
-                    try:
-                        markup = InlineKeyboardMarkup()
-                        button = InlineKeyboardButton(
-                            text=f"Buka {text} di Binance 📲",
-                            url=f"https://www.binance.com/en/futures/{text}?ref=GRO_16987_24H8Y"
-                        )
-                        markup.add(button)
-                        TELEGRAM_BOT.send_message(chat_id, "Klik tombol di bawah untuk buka di aplikasi Binance:", reply_markup=markup)
-                    except Exception as e:
-                        print(f"❌ Error kirim tombol: {e}")
-
+                    markup = InlineKeyboardMarkup()
+                    button = InlineKeyboardButton(
+                        text=f"Buka {text} di Binance 📲",
+                        url=f"https://www.binance.com/en/futures/{text}?ref=GRO_16987_24H8Y"
+                    )
+                    markup.add(button)
+                    TELEGRAM_BOT.send_message(chat_id, "Klik tombol di bawah untuk buka di aplikasi Binance:", reply_markup=markup)
             except Exception as e:
                 TELEGRAM_BOT.send_message(chat_id, f"Error analisis: {e}")
         else:
