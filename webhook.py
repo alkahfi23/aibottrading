@@ -3,6 +3,7 @@ import os
 import matplotlib.pyplot as plt
 import mplfinance as mpf
 import pandas as pd
+import numpy as np
 import ta
 import telebot
 from datetime import datetime
@@ -19,6 +20,14 @@ BINANCE_API_SECRET = os.getenv("BINANCE_API_SECRET")
 
 client = Client(BINANCE_API_KEY, BINANCE_API_SECRET)
 
+# Validasi symbol sederhana, bisa diperluas sesuai kebutuhan
+def is_valid_symbol(sym):
+    try:
+        info = client.get_symbol_info(sym)
+        return info is not None
+    except Exception:
+        return False
+
 def get_klines(symbol, interval=Client.KLINE_INTERVAL_5MINUTE, limit=100):
     try:
         raw = client.get_klines(symbol=symbol, interval=interval, limit=limit)
@@ -32,11 +41,12 @@ def get_klines(symbol, interval=Client.KLINE_INTERVAL_5MINUTE, limit=100):
         df = df.astype(float)
         return df[['open', 'high', 'low', 'close', 'volume']]
     except Exception as e:
+        print(f"Error get_klines: {e}")
         return None
 
 def analyze_pair(symbol):
     df = get_klines(symbol)
-    if df is None:
+    if df is None or df.empty:
         return "Data tidak tersedia.", "NONE"
 
     df['EMA20'] = ta.trend.ema_indicator(df['close'], window=20)
@@ -56,13 +66,17 @@ def analyze_pair(symbol):
     resistance = df['high'][-20:].max()
 
     avg_volume = df['volume'].rolling(window=20).mean()
-    volume_spike = last['volume'] > avg_volume.iloc[-1] * 1.5
+    volume_spike = last['volume'] > avg_volume.iloc[-1] * 1.5 if not np.isnan(avg_volume.iloc[-1]) else False
 
     trend = "Bullish" if last['EMA20'] > last['EMA50'] else "Bearish"
-    rsi_status = f"{round(last['RSI'],1)} (Overbought)" if last['RSI'] > 70 else f"{round(last['RSI'],1)} (Oversold)" if last['RSI'] < 30 else f"{round(last['RSI'],1)} (Netral)"
+    rsi_status = (f"{round(last['RSI'],1)} (Overbought)" if last['RSI'] > 70 else
+                  f"{round(last['RSI'],1)} (Oversold)" if last['RSI'] < 30 else
+                  f"{round(last['RSI'],1)} (Netral)")
     macd_signal = "✅ Bullish Crossover" if last['MACD'] > last['MACD_SIGNAL'] else "❌ Bearish Crossover"
     adx_strength = round(last['ADX'],1)
-    bb_status = "Breakout atas" if last['close'] > last['BB_H'] else "Breakout bawah" if last['close'] < last['BB_L'] else "Dalam band"
+    bb_status = ("Breakout atas" if last['close'] > last['BB_H'] else
+                 "Breakout bawah" if last['close'] < last['BB_L'] else
+                 "Dalam band")
 
     signal = "NONE"
     if trend == "Bullish" and last['MACD'] > last['MACD_SIGNAL'] and last['RSI'] > 50:
@@ -70,27 +84,51 @@ def analyze_pair(symbol):
     elif trend == "Bearish" and last['MACD'] < last['MACD_SIGNAL'] and last['RSI'] < 50:
         signal = "SHORT"
 
+    # Fix supaya SL dan TP tidak sama dengan entry price:
+    # Beri jarak minimal 0.1% dari entry (atau harga support/resistance yg lebih konservatif)
+    def adjust_levels(entry, sl, tp):
+        if abs(entry - sl) < entry * 0.001:  # < 0.1%
+            if sl < entry:
+                sl = entry * 0.999  # 0.1% bawah
+            else:
+                sl = entry * 1.001  # 0.1% atas
+        if abs(tp - entry) < entry * 0.001:
+            if tp > entry:
+                tp = entry * 1.001
+            else:
+                tp = entry * 0.999
+        return round(sl,8), round(tp,8)
+
     if signal == "LONG":
         entry = current_price
-        sl = min(support, entry * 0.98)
-        tp = max(resistance, entry * 1.02)
-        if abs(tp - entry) / entry < 0.002:
-            tp = round(entry * 1.02, 6)
+        sl, tp = adjust_levels(entry, support, resistance)
     elif signal == "SHORT":
         entry = current_price
-        sl = max(resistance, entry * 1.02)
-        tp = min(support, entry * 0.98)
-        if abs(entry - tp) / entry < 0.002:
-            tp = round(entry * 0.98, 6)
+        sl, tp = adjust_levels(entry, resistance, support)
     else:
         entry = sl = tp = "-"
 
+    # Format harga sesuai simbol agar presisi tampilannya sesuai
+    def format_price(price):
+        if price == "-":
+            return price
+        # cari decimals (misal ARBUSDT biasanya 6-8 decimal)
+        dec = 8 if 'USDT' in symbol else 4
+        return f"{price:.{dec}f}"
+
+    entry_str = format_price(entry)
+    sl_str = format_price(sl)
+    tp_str = format_price(tp)
+    current_price_str = format_price(current_price)
+    support_str = format_price(support)
+    resistance_str = format_price(resistance)
+
     result = f"""
 📊 Pair: {symbol}
-💰 Harga Terkini: ${current_price}
+💰 Harga Terkini: ${current_price_str}
 📈 Trend: {trend}
-📍 Support: ${support}
-📍 Resistance: ${resistance}
+📍 Support: ${support_str}
+📍 Resistance: ${resistance_str}
 📉 Volume Spike: {'Aktif 🚨' if volume_spike else 'Tidak'}
 📌 RSI: {rsi_status}
 📌 MACD: {macd_signal}
@@ -99,43 +137,53 @@ def analyze_pair(symbol):
 📊 Bollinger Bands: {bb_status}
 
 📤 Sinyal Validasi Akhir: {'✅ ' + signal if signal != 'NONE' else '⛔ Tidak ada sinyal valid'}
-🎯 Saran Entry: {entry}
-🛡️ Stop Loss: {sl}
-🎯 Take Profit: {tp}
+🎯 Saran Entry: {entry_str}
+🛡️ Stop Loss: {sl_str}
+🎯 Take Profit: {tp_str}
 """
     return result.strip(), signal
 
 def generate_chart(symbol):
-    df = get_klines(symbol)
-    if df is None:
+    try:
+        df = get_klines(symbol)
+        if df is None or df.empty:
+            return None
+
+        df['EMA20'] = ta.trend.ema_indicator(df['close'], window=20)
+        df['EMA50'] = ta.trend.ema_indicator(df['close'], window=50)
+
+        last_close = float(df['close'].iloc[-1]) if pd.notna(df['close'].iloc[-1]) else np.nan
+        bullish = df['EMA20'].iloc[-1] > df['EMA50'].iloc[-1]
+        signal_marker = [np.nan] * (len(df) - 1) + [last_close]
+
+        addplot = [
+            mpf.make_addplot(df['EMA20'], color='green'),
+            mpf.make_addplot(df['EMA50'], color='red'),
+            mpf.make_addplot(signal_marker, type='scatter', markersize=150,
+                             marker='^' if bullish else 'v',
+                             color='blue')
+        ]
+
+        fig, ax = mpf.plot(
+            df,
+            type='candle',
+            style='yahoo',
+            addplot=addplot,
+            volume=True,
+            returnfig=True,
+            figsize=(9, 6),
+            title=f"{symbol} - Future Signal Pro"
+        )
+
+        buf = BytesIO()
+        fig.savefig(buf, format="png", bbox_inches="tight")
+        plt.close(fig)
+        buf.seek(0)
+        return buf
+
+    except Exception as e:
+        print(f"Error generate_chart: {e}")
         return None
-
-    df['EMA20'] = ta.trend.ema_indicator(df['close'], window=20)
-    df['EMA50'] = ta.trend.ema_indicator(df['close'], window=50)
-    last = df.iloc[-1]
-
-    addplot = [
-        mpf.make_addplot(df['EMA20'], color='green'),
-        mpf.make_addplot(df['EMA50'], color='red'),
-        mpf.make_addplot([None]*(len(df)-1) + [last['close']], type='scatter', markersize=200, marker='^' if last['EMA20'] > last['EMA50'] else 'v', color='blue')
-    ]
-
-    fig, ax = mpf.plot(
-        df,
-        type='candle',
-        style='yahoo',
-        addplot=addplot,
-        volume=True,
-        returnfig=True,
-        figsize=(8,6),
-        title=f"{symbol} - Future Signal Pro"
-    )
-
-    buf = BytesIO()
-    fig.savefig(buf, format="png")
-    plt.close(fig)
-    buf.seek(0)
-    return buf
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
@@ -144,32 +192,32 @@ def webhook():
         text = data["message"]["text"].strip().upper()
         chat_id = data["message"]["chat"]["id"]
 
-        if len(text) < 6 or not text.isalnum():
-            return "Invalid input"
+        # Filter hanya symbol valid supaya tidak error
+        if not is_valid_symbol(text):
+            TELEGRAM_BOT.send_message(chat_id, "Symbol tidak valid atau tidak ditemukan di Binance.")
+            return "OK"
 
-        df = get_klines(text)
-        if df is None:
-            return "Invalid symbol"
+        if len(text) >= 6:
+            try:
+                message, signal = analyze_pair(text)
+                TELEGRAM_BOT.send_message(chat_id, message, parse_mode="Markdown")
 
-        try:
-            message, signal = analyze_pair(text)
-            TELEGRAM_BOT.send_message(chat_id, message, parse_mode="Markdown")
+                if signal != "NONE":
+                    chart = generate_chart(text)
+                    if chart:
+                        TELEGRAM_BOT.send_photo(chat_id, chart)
 
-            if signal != "NONE":
-                chart = generate_chart(text)
-                if chart:
-                    TELEGRAM_BOT.send_photo(chat_id, chart)
+                    # Tombol menuju aplikasi Binance dengan referral
+                    markup = InlineKeyboardMarkup()
+                    button = InlineKeyboardButton(
+                        text=f"Buka {text} di Binance 📲",
+                        url=f"https://www.binance.com/en/futures/{text}?ref=GRO_16987_24H8Y"
+                    )
+                    markup.add(button)
+                    TELEGRAM_BOT.send_message(chat_id, "Klik tombol di bawah untuk buka di aplikasi Binance:", reply_markup=markup)
 
-                markup = InlineKeyboardMarkup()
-                button = InlineKeyboardButton(
-                    text=f"Buka {text} di Binance 📲",
-                    url=f"https://www.binance.com/en/futures/{text}?ref=GRO_16987_24H8Y"
-                )
-                markup.add(button)
-                TELEGRAM_BOT.send_message(chat_id, "Klik tombol di bawah untuk buka di aplikasi Binance:", reply_markup=markup)
-
-        except Exception as e:
-            TELEGRAM_BOT.send_message(chat_id, f"Error analisis: {e}")
+            except Exception as e:
+                TELEGRAM_BOT.send_message(chat_id, f"Error analisis: {e}")
     return "OK"
 
 if __name__ == '__main__':
