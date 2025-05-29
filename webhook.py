@@ -53,30 +53,34 @@ def analyze_multi_timeframe(symbol):
     df_1h['MACD'] = macd.macd()
     df_1h['MACD_SIGNAL'] = macd.macd_signal()
     df_1h['ADX'] = ta.trend.adx(df_1h['high'], df_1h['low'], df_1h['close'], window=14)
+    df_1h['ATR'] = ta.volatility.average_true_range(df_1h['high'], df_1h['low'], df_1h['close'], window=14)
 
     last_1h = df_1h.iloc[-1]
     signal = "NONE"
 
-    if long_term_trend == "Bullish" and last_1h['MACD'] > last_1h['MACD_SIGNAL'] and last_1h['RSI'] > 50:
+    df_5m['BB_L'] = ta.volatility.BollingerBands(df_5m['close']).bollinger_lband()
+    df_5m['BB_H'] = ta.volatility.BollingerBands(df_5m['close']).bollinger_hband()
+    df_5m['MFI'] = ta.volume.money_flow_index(df_5m['high'], df_5m['low'], df_5m['close'], df_5m['volume'], window=14)
+
+    df_5m['Volume_SMA'] = df_5m['volume'].rolling(window=20).mean()
+    df_5m['Volume_Spike'] = df_5m['volume'] > 1.5 * df_5m['Volume_SMA']
+
+    last_5m = df_5m.iloc[-1]
+    volume_spike = last_5m['Volume_Spike']
+
+    if long_term_trend == "Bullish" and last_1h['MACD'] > last_1h['MACD_SIGNAL'] and last_1h['RSI'] > 50 and last_5m['MFI'] > 50 and volume_spike:
         signal = "LONG"
-    elif long_term_trend == "Bearish" and last_1h['MACD'] < last_1h['MACD_SIGNAL'] and last_1h['RSI'] < 50:
+    elif long_term_trend == "Bearish" and last_1h['MACD'] < last_1h['MACD_SIGNAL'] and last_1h['RSI'] < 50 and last_5m['MFI'] < 50 and volume_spike:
         signal = "SHORT"
 
-    bb_5m = ta.volatility.BollingerBands(df_5m['close'])
-    df_5m['BB_L'] = bb_5m.bollinger_lband()
-    df_5m['BB_H'] = bb_5m.bollinger_hband()
-
-    entry = "-"
-    stop_loss = "-"
-    take_profit = "-"
-
+    entry = stop_loss = take_profit = "-"
     if signal == "LONG":
-        entry = df_5m['BB_L'].iloc[-1]
-        stop_loss = entry * 0.985
+        entry = last_5m['BB_L']
+        stop_loss = entry - last_1h['ATR']
         take_profit = entry + (entry - stop_loss) * 1.5
     elif signal == "SHORT":
-        entry = df_5m['BB_H'].iloc[-1]
-        stop_loss = entry * 1.015
+        entry = last_5m['BB_H']
+        stop_loss = entry + last_1h['ATR']
         take_profit = entry - (stop_loss - entry) * 1.5
 
     current_price = df_1h['close'].iloc[-1]
@@ -95,6 +99,7 @@ def analyze_multi_timeframe(symbol):
 📌 RSI 1H: {round(last_1h['RSI'],1)}
 📌 MACD: {'Bullish' if last_1h['MACD'] > last_1h['MACD_SIGNAL'] else 'Bearish'}
 📌 ADX: {round(last_1h['ADX'],1)}
+📊 Volume Spike: {'✅' if volume_spike else '❌'}
 
 📄 Sinyal Final: {'✅ ' + signal if signal != 'NONE' else '⛔ Tidak valid'}
 💰 Harga Saat Ini: ${format_price(current_price)}
@@ -102,8 +107,8 @@ def analyze_multi_timeframe(symbol):
 
     if signal != "NONE":
         result += f"""
-🎯 Entry: {format_price(entry)}
-🛡️ Stop Loss: {format_price(stop_loss)}
+🎯 Entry (BB 5M): {format_price(entry)}
+🛡️ Stop Loss (ATR): {format_price(stop_loss)}
 🎯 Take Profit: {format_price(take_profit)}
 """
 
@@ -117,17 +122,19 @@ def generate_chart(symbol, signal_type="NONE", entry_price=None):
     df['EMA50'] = ta.trend.ema_indicator(df['close'], window=50)
     df['EMA200'] = ta.trend.ema_indicator(df['close'], window=200)
 
+    last_price = df['close'].iloc[-1]
+
     addplot = [
         mpf.make_addplot(df['EMA50'], color='green'),
         mpf.make_addplot(df['EMA200'], color='red')
     ]
 
     if signal_type == "LONG" and entry_price:
-        signal_marker = [np.nan] * (len(df) - 1) + [entry_price]
-        addplot.append(mpf.make_addplot(signal_marker, type='scatter', markersize=100, marker='^', color='green'))
+        addplot.append(mpf.make_addplot([np.nan]*(len(df)-1) + [entry_price],
+                                        type='scatter', markersize=100, marker='^', color='green'))
     elif signal_type == "SHORT" and entry_price:
-        signal_marker = [np.nan] * (len(df) - 1) + [entry_price]
-        addplot.append(mpf.make_addplot(signal_marker, type='scatter', markersize=100, marker='v', color='red'))
+        addplot.append(mpf.make_addplot([np.nan]*(len(df)-1) + [entry_price],
+                                        type='scatter', markersize=100, marker='v', color='red'))
 
     fig, ax = mpf.plot(
         df, type='candle', style='yahoo', addplot=addplot,
@@ -155,7 +162,7 @@ def webhook():
                 message, signal, entry = analyze_multi_timeframe(text)
                 TELEGRAM_BOT.send_message(chat_id, message, parse_mode="Markdown")
 
-                if signal != "NONE" and entry:
+                if signal != "NONE":
                     chart = generate_chart(text, signal, entry)
                     if chart:
                         TELEGRAM_BOT.send_photo(chat_id, chart)
