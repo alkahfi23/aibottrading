@@ -20,7 +20,9 @@ BINANCE_API_SECRET = os.getenv("BINANCE_API_SECRET")
 
 client = Client(BINANCE_API_KEY, BINANCE_API_SECRET)
 
-def get_klines(symbol, interval=Client.KLINE_INTERVAL_5MINUTE, limit=100):
+# ... [IMPORT & INISIALISASI Tetap sama seperti sebelumnya] ...
+
+def get_klines(symbol, interval="5m", limit=100):
     try:
         raw = client.get_klines(symbol=symbol, interval=interval, limit=limit)
         df = pd.DataFrame(raw, columns=[
@@ -33,160 +35,99 @@ def get_klines(symbol, interval=Client.KLINE_INTERVAL_5MINUTE, limit=100):
         df = df.astype(float)
         return df[['open', 'high', 'low', 'close', 'volume']]
     except Exception as e:
-        print(f"Error get_klines: {e}")
+        print(f"Error get_klines ({interval}): {e}")
         return None
 
-def get_klines_1m(symbol, limit=100):
-    try:
-        raw = client.get_klines(symbol=symbol, interval=Client.KLINE_INTERVAL_1MINUTE, limit=limit)
-        df = pd.DataFrame(raw, columns=[
-            'timestamp', 'open', 'high', 'low', 'close', 'volume',
-            'close_time', 'quote_asset_volume', 'number_of_trades',
-            'taker_buy_base', 'taker_buy_quote', 'ignore'
-        ])
-        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-        df.set_index('timestamp', inplace=True)
-        df = df.astype(float)
-        return df[['open', 'high', 'low', 'close', 'volume']]
-    except Exception as e:
-        print(f"Error get_klines_1m: {e}")
-        return None
+def analyze_multi_timeframe(symbol):
+    df_4h = get_klines(symbol, interval="4h", limit=100)
+    df_1h = get_klines(symbol, interval="1h", limit=100)
+    df_5m = get_klines(symbol, interval="5m", limit=100)
 
-def analyze_pair(symbol):
-    df = get_klines(symbol)
-    if df is None or df.empty:
-        return "Data 5 menit tidak tersedia.", "NONE"
+    if df_4h is None or df_1h is None or df_5m is None:
+        return "📉 Data tidak lengkap untuk analisis multi-timeframe.", "NONE"
 
-    df_1m = get_klines_1m(symbol)
-    if df_1m is None or df_1m.empty:
-        return "Data 1 menit tidak tersedia.", "NONE"
+    df_4h['EMA50'] = ta.trend.ema_indicator(df_4h['close'], window=50)
+    df_4h['EMA200'] = ta.trend.ema_indicator(df_4h['close'], window=200)
+    long_term_trend = "Bullish" if df_4h['EMA50'].iloc[-1] > df_4h['EMA200'].iloc[-1] else "Bearish"
 
-    # Hitung indikator
-    df['EMA20'] = ta.trend.ema_indicator(df['close'], window=20)
-    df['EMA50'] = ta.trend.ema_indicator(df['close'], window=50)
-    df['RSI'] = ta.momentum.rsi(df['close'], window=14)
-    macd = ta.trend.MACD(df['close'])
-    df['MACD'] = macd.macd()
-    df['MACD_SIGNAL'] = macd.macd_signal()
-    df['ADX'] = ta.trend.adx(df['high'], df['low'], df['close'], window=14)
-    bb = ta.volatility.BollingerBands(df['close'])
-    df['BB_H'] = bb.bollinger_hband()
-    df['BB_L'] = bb.bollinger_lband()
+    df_1h['RSI'] = ta.momentum.rsi(df_1h['close'], window=14)
+    macd = ta.trend.MACD(df_1h['close'])
+    df_1h['MACD'] = macd.macd()
+    df_1h['MACD_SIGNAL'] = macd.macd_signal()
+    df_1h['ADX'] = ta.trend.adx(df_1h['high'], df_1h['low'], df_1h['close'], window=14)
 
-    # BB 1m untuk entry
-    bb_1m = ta.volatility.BollingerBands(df_1m['close'])
-    df_1m['BB_H'] = bb_1m.bollinger_hband()
-    df_1m['BB_L'] = bb_1m.bollinger_lband()
-
-    last = df.iloc[-1]
-    current_price = last['close']
-    support = df['low'][-20:].min()
-    resistance = df['high'][-20:].max()
-
-    avg_volume = df['volume'].rolling(window=20).mean()
-    volume_spike = last['volume'] > avg_volume.iloc[-1] * 1.5 if not np.isnan(avg_volume.iloc[-1]) else False
-
-    trend = "Bullish" if last['EMA20'] > last['EMA50'] else "Bearish"
-    rsi_status = (f"{round(last['RSI'],1)} (Overbought)" if last['RSI'] > 70 else
-                  f"{round(last['RSI'],1)} (Oversold)" if last['RSI'] < 30 else
-                  f"{round(last['RSI'],1)} (Netral)")
-    macd_signal = "✅ Bullish Crossover" if last['MACD'] > last['MACD_SIGNAL'] else "❌ Bearish Crossover"
-    adx_strength = round(last['ADX'],1)
-    bb_status = ("Breakout atas" if last['close'] > last['BB_H'] else
-                 "Breakout bawah" if last['close'] < last['BB_L'] else
-                 "Dalam band")
-
+    last_1h = df_1h.iloc[-1]
     signal = "NONE"
-    if trend == "Bullish" and last['MACD'] > last['MACD_SIGNAL'] and last['RSI'] > 50:
+
+    if long_term_trend == "Bullish" and last_1h['MACD'] > last_1h['MACD_SIGNAL'] and last_1h['RSI'] > 50:
         signal = "LONG"
-    elif trend == "Bearish" and last['MACD'] < last['MACD_SIGNAL'] and last['RSI'] < 50:
+    elif long_term_trend == "Bearish" and last_1h['MACD'] < last_1h['MACD_SIGNAL'] and last_1h['RSI'] < 50:
         signal = "SHORT"
 
+    bb_5m = ta.volatility.BollingerBands(df_5m['close'])
+    df_5m['BB_L'] = bb_5m.bollinger_lband()
+    df_5m['BB_H'] = bb_5m.bollinger_hband()
+
+    entry = "-"
     if signal == "LONG":
-        entry = df_1m['BB_L'].iloc[-1]
-        sl = support
-        tp = resistance
+        entry = df_5m['BB_L'].iloc[-1]
     elif signal == "SHORT":
-        entry = df_1m['BB_H'].iloc[-1]
-        sl = resistance
-        tp = support
-    else:
-        entry = sl = tp = "-"
+        entry = df_5m['BB_H'].iloc[-1]
 
-    # Format harga
-    def format_price(price):
-        if price == "-":
-            return price
+    support = df_1h['low'][-20:].min()
+    resistance = df_1h['high'][-20:].max()
+    current_price = df_1h['close'].iloc[-1]
+
+    def format_price(p):
+        if p == "-":
+            return "-"
         dec = 8 if 'USDT' in symbol else 4
-        return f"{price:.{dec}f}"
-
-    entry_str = format_price(entry)
-    sl_str = format_price(sl)
-    tp_str = format_price(tp)
-    current_price_str = format_price(current_price)
-    support_str = format_price(support)
-    resistance_str = format_price(resistance)
+        return f"{p:.{dec}f}"
 
     result = f"""
 📊 Pair: {symbol}
-💰 Harga Terkini: ${current_price_str}
-📈 Trend: {trend}
-📍 Support: ${support_str}
-📍 Resistance: ${resistance_str}
-📉 Volume Spike: {'Aktif 🚨' if volume_spike else 'Tidak'}
-📌 RSI: {rsi_status}
-📌 MACD: {macd_signal}
-📌 ADX: {adx_strength}
-📌 EMA20 vs EMA50: {'Golden Cross' if trend == 'Bullish' else 'Death Cross'}
-📊 Bollinger Bands: {bb_status}
+⏰ TF Utama: 4H | Konfirmasi: 1H | Entry: 5M
 
-📤 Sinyal Validasi Akhir: {'✅ ' + signal if signal != 'NONE' else '⛔ Tidak ada sinyal valid'}
-🎯 Saran Entry: {entry_str}
-🛡️ Stop Loss: {sl_str}
-🎯 Take Profit: {tp_str}
+📈 Trend 4H: {long_term_trend}
+📌 RSI 1H: {round(last_1h['RSI'],1)}
+📌 MACD: {"Bullish" if last_1h['MACD'] > last_1h['MACD_SIGNAL'] else "Bearish"}
+📌 ADX: {round(last_1h['ADX'],1)}
+
+📤 Sinyal Final: {'✅ ' + signal if signal != 'NONE' else '⛔ Tidak valid'}
+💰 Harga Saat Ini: ${format_price(current_price)}
+🎯 Entry (BB 5M): {format_price(entry)}
+🛡️ Stop Loss: {format_price(support)}
+🎯 Take Profit: {format_price(resistance)}
 """
     return result.strip(), signal
 
 def generate_chart(symbol, signal_type="NONE"):
-    df = get_klines(symbol)
+    df = get_klines(symbol, interval="1h", limit=100)
     if df is None or df.empty:
         return None
 
-    df['EMA20'] = ta.trend.ema_indicator(df['close'], window=20)
     df['EMA50'] = ta.trend.ema_indicator(df['close'], window=50)
+    df['EMA200'] = ta.trend.ema_indicator(df['close'], window=200)
 
-    last_idx = df.index[-1]
     last_price = df['close'].iloc[-1]
 
     addplot = [
-        mpf.make_addplot(df['EMA20'], color='green'),
-        mpf.make_addplot(df['EMA50'], color='red')
+        mpf.make_addplot(df['EMA50'], color='green'),
+        mpf.make_addplot(df['EMA200'], color='red')
     ]
 
-    # Tambahkan sinyal LONG atau SHORT sebagai panah
     if signal_type == "LONG":
-        addplot.append(mpf.make_addplot(
-            [np.nan]*(len(df)-1) + [last_price * 0.995],
-            type='scatter', markersize=100, marker='^', color='green'
-        ))
+        addplot.append(mpf.make_addplot([np.nan]*(len(df)-1) + [last_price * 0.995],
+                                        type='scatter', markersize=100, marker='^', color='green'))
     elif signal_type == "SHORT":
-        addplot.append(mpf.make_addplot(
-            [np.nan]*(len(df)-1) + [last_price * 1.005],
-            type='scatter', markersize=100, marker='v', color='red'
-        ))
+        addplot.append(mpf.make_addplot([np.nan]*(len(df)-1) + [last_price * 1.005],
+                                        type='scatter', markersize=100, marker='v', color='red'))
 
     fig, ax = mpf.plot(
-        df,
-        type='candle',
-        style='yahoo',
-        addplot=addplot,
-        volume=True,
-        returnfig=True,
-        figsize=(8, 6),
+        df, type='candle', style='yahoo', addplot=addplot,
+        volume=True, returnfig=True, figsize=(8, 6),
         title=f"{symbol} - Signal Future Pro"
     )
-
-    # Tambahkan label "Signal Future Pro"
     ax[0].text(0.02, 0.95, "Signal Future Pro", transform=ax[0].transAxes,
                fontsize=14, fontweight='bold', color='blue', bbox=dict(facecolor='white', alpha=0.7))
 
@@ -196,7 +137,6 @@ def generate_chart(symbol, signal_type="NONE"):
     buf.seek(0)
     return buf
 
-
 @app.route('/webhook', methods=['POST'])
 def webhook():
     data = request.get_json()
@@ -204,10 +144,9 @@ def webhook():
         text = data["message"]["text"].strip().upper()
         chat_id = data["message"]["chat"]["id"]
 
-        # Validasi simbol
         if len(text) >= 6 and text.isalnum():
             try:
-                message, signal = analyze_pair(text)
+                message, signal = analyze_multi_timeframe(text)
                 TELEGRAM_BOT.send_message(chat_id, message, parse_mode="Markdown")
 
                 if signal != "NONE":
@@ -222,7 +161,6 @@ def webhook():
                     )
                     markup.add(button)
                     TELEGRAM_BOT.send_message(chat_id, "Klik tombol di bawah untuk buka di aplikasi Binance:", reply_markup=markup)
-
             except Exception as e:
                 TELEGRAM_BOT.send_message(chat_id, f"Error analisis: {e}")
         else:
@@ -232,3 +170,4 @@ def webhook():
 if __name__ == '__main__':
     port = int(os.getenv("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
