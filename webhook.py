@@ -10,7 +10,6 @@ from datetime import datetime
 from binance.client import Client
 from io import BytesIO
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-import traceback
 
 app = Flask(__name__)
 
@@ -24,8 +23,6 @@ client = Client(BINANCE_API_KEY, BINANCE_API_SECRET)
 def get_klines(symbol, interval="5m", limit=100):
     try:
         raw = client.get_klines(symbol=symbol, interval=interval, limit=limit)
-        if not raw or len(raw) == 0:
-            return None
         df = pd.DataFrame(raw, columns=[
             'timestamp', 'open', 'high', 'low', 'close', 'volume',
             'close_time', 'quote_asset_volume', 'number_of_trades',
@@ -34,8 +31,6 @@ def get_klines(symbol, interval="5m", limit=100):
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
         df.set_index('timestamp', inplace=True)
         df = df.astype(float)
-        if df.empty or df.isnull().values.any():
-            return None
         return df[['open', 'high', 'low', 'close', 'volume']]
     except Exception as e:
         print(f"Error get_klines ({interval}): {e}")
@@ -71,9 +66,9 @@ def analyze_multi_timeframe(symbol):
     df_5m['BB_L'] = bb_5m.bollinger_lband()
     df_5m['BB_H'] = bb_5m.bollinger_hband()
 
-    entry = None
-    stop_loss = None
-    take_profit = None
+    entry = "-"
+    stop_loss = "-"
+    take_profit = "-"
 
     if signal == "LONG":
         entry = df_5m['BB_L'].iloc[-1]
@@ -87,7 +82,7 @@ def analyze_multi_timeframe(symbol):
     current_price = df_1h['close'].iloc[-1]
 
     def format_price(p):
-        if p is None:
+        if p == "-" or p is None:
             return "-"
         dec = 8 if 'USDT' in symbol else 4
         return f"{p:.{dec}f}"
@@ -105,9 +100,9 @@ def analyze_multi_timeframe(symbol):
 💰 Harga Saat Ini: ${format_price(current_price)}
 """
 
-    if signal != "NONE" and entry is not None:
+    if signal != "NONE":
         result += f"""
-🎯 Entry (BB 5M): {format_price(entry)}
+🎯 Entry: {format_price(entry)}
 🛡️ Stop Loss: {format_price(stop_loss)}
 🎯 Take Profit: {format_price(take_profit)}
 """
@@ -116,8 +111,7 @@ def analyze_multi_timeframe(symbol):
 
 def generate_chart(symbol, signal_type="NONE", entry_price=None):
     df = get_klines(symbol, interval="1h", limit=100)
-    if df is None or df.empty or len(df) < 2:
-        print("Error generate_chart: DataFrame kosong atau terlalu sedikit data.")
+    if df is None or df.empty:
         return None
 
     df['EMA50'] = ta.trend.ema_indicator(df['close'], window=50)
@@ -129,11 +123,11 @@ def generate_chart(symbol, signal_type="NONE", entry_price=None):
     ]
 
     if signal_type == "LONG" and entry_price:
-        addplot.append(mpf.make_addplot([np.nan]*(len(df)-1) + [entry_price],
-                                        type='scatter', markersize=100, marker='^', color='green'))
+        signal_marker = [np.nan] * (len(df) - 1) + [entry_price]
+        addplot.append(mpf.make_addplot(signal_marker, type='scatter', markersize=100, marker='^', color='green'))
     elif signal_type == "SHORT" and entry_price:
-        addplot.append(mpf.make_addplot([np.nan]*(len(df)-1) + [entry_price],
-                                        type='scatter', markersize=100, marker='v', color='red'))
+        signal_marker = [np.nan] * (len(df) - 1) + [entry_price]
+        addplot.append(mpf.make_addplot(signal_marker, type='scatter', markersize=100, marker='v', color='red'))
 
     fig, ax = mpf.plot(
         df, type='candle', style='yahoo', addplot=addplot,
@@ -175,7 +169,6 @@ def webhook():
                     TELEGRAM_BOT.send_message(chat_id, "Klik tombol di bawah untuk buka di aplikasi Binance:", reply_markup=markup)
             except Exception as e:
                 TELEGRAM_BOT.send_message(chat_id, f"Error analisis: {e}")
-                print(traceback.format_exc())
         else:
             TELEGRAM_BOT.send_message(chat_id, "Format simbol tidak valid atau terlalu pendek.")
     return "OK"
