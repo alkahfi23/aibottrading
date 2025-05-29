@@ -61,7 +61,7 @@ def analyze_pair(symbol):
     if df_1m is None or df_1m.empty:
         return "Data 1 menit tidak tersedia.", "NONE"
 
-    # Hitung indikator di 5m
+    # Hitung indikator
     df['EMA20'] = ta.trend.ema_indicator(df['close'], window=20)
     df['EMA50'] = ta.trend.ema_indicator(df['close'], window=50)
     df['RSI'] = ta.momentum.rsi(df['close'], window=14)
@@ -73,7 +73,7 @@ def analyze_pair(symbol):
     df['BB_H'] = bb.bollinger_hband()
     df['BB_L'] = bb.bollinger_lband()
 
-    # Bollinger Bands 1m untuk entry price
+    # BB 1m untuk entry
     bb_1m = ta.volatility.BollingerBands(df_1m['close'])
     df_1m['BB_H'] = bb_1m.bollinger_hband()
     df_1m['BB_L'] = bb_1m.bollinger_lband()
@@ -102,25 +102,18 @@ def analyze_pair(symbol):
     elif trend == "Bearish" and last['MACD'] < last['MACD_SIGNAL'] and last['RSI'] < 50:
         signal = "SHORT"
 
-    # Fungsi bantu adjust SL dan TP supaya tidak terlalu dekat entry
-    def adjust_levels(entry, sl, tp):
-        if abs(entry - sl) < entry * 0.001:
-            sl = sl * (0.999 if sl < entry else 1.001)
-        if abs(tp - entry) < entry * 0.001:
-            tp = tp * (1.001 if tp > entry else 0.999)
-        return round(sl,8), round(tp,8)
-
-    # Tentukan entry price pakai BB 1m
     if signal == "LONG":
         entry = df_1m['BB_L'].iloc[-1]
-        sl, tp = adjust_levels(entry, support, resistance)
+        sl = support
+        tp = resistance
     elif signal == "SHORT":
         entry = df_1m['BB_H'].iloc[-1]
-        sl, tp = adjust_levels(entry, resistance, support)
+        sl = resistance
+        tp = support
     else:
         entry = sl = tp = "-"
 
-    # Fungsi format harga
+    # Format harga
     def format_price(price):
         if price == "-":
             return price
@@ -154,17 +147,33 @@ def analyze_pair(symbol):
 """
     return result.strip(), signal
 
-def generate_chart(symbol):
+def generate_chart(symbol, signal_type="NONE"):
     df = get_klines(symbol)
     if df is None or df.empty:
         return None
 
     df['EMA20'] = ta.trend.ema_indicator(df['close'], window=20)
     df['EMA50'] = ta.trend.ema_indicator(df['close'], window=50)
+
+    last_idx = df.index[-1]
+    last_price = df['close'].iloc[-1]
+
     addplot = [
         mpf.make_addplot(df['EMA20'], color='green'),
         mpf.make_addplot(df['EMA50'], color='red')
     ]
+
+    # Tambahkan sinyal LONG atau SHORT sebagai panah
+    if signal_type == "LONG":
+        addplot.append(mpf.make_addplot(
+            [np.nan]*(len(df)-1) + [last_price * 0.995],
+            type='scatter', markersize=100, marker='^', color='green'
+        ))
+    elif signal_type == "SHORT":
+        addplot.append(mpf.make_addplot(
+            [np.nan]*(len(df)-1) + [last_price * 1.005],
+            type='scatter', markersize=100, marker='v', color='red'
+        ))
 
     fig, ax = mpf.plot(
         df,
@@ -173,15 +182,20 @@ def generate_chart(symbol):
         addplot=addplot,
         volume=True,
         returnfig=True,
-        figsize=(8,6),
-        title=f"{symbol} - 5m"
+        figsize=(8, 6),
+        title=f"{symbol} - Signal Future Pro"
     )
+
+    # Tambahkan label "Signal Future Pro"
+    ax[0].text(0.02, 0.95, "Signal Future Pro", transform=ax[0].transAxes,
+               fontsize=14, fontweight='bold', color='blue', bbox=dict(facecolor='white', alpha=0.7))
 
     buf = BytesIO()
     fig.savefig(buf, format="png")
     plt.close(fig)
     buf.seek(0)
     return buf
+
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
@@ -190,14 +204,14 @@ def webhook():
         text = data["message"]["text"].strip().upper()
         chat_id = data["message"]["chat"]["id"]
 
-        # Validasi simbol (minimal 6 karakter dan alfanumerik)
+        # Validasi simbol
         if len(text) >= 6 and text.isalnum():
             try:
                 message, signal = analyze_pair(text)
                 TELEGRAM_BOT.send_message(chat_id, message, parse_mode="Markdown")
 
                 if signal != "NONE":
-                    chart = generate_chart(text)
+                    chart = generate_chart(text, signal)
                     if chart:
                         TELEGRAM_BOT.send_photo(chat_id, chart)
 
