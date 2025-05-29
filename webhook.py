@@ -13,14 +13,12 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 app = Flask(__name__)
 
+# Load API keys from environment variables
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_BOT = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 BINANCE_API_KEY = os.getenv("BINANCE_API_KEY")
 BINANCE_API_SECRET = os.getenv("BINANCE_API_SECRET")
-
 client = Client(BINANCE_API_KEY, BINANCE_API_SECRET)
-
-# ... [IMPORT & INISIALISASI Tetap sama seperti sebelumnya] ...
 
 def get_klines(symbol, interval="5m", limit=100):
     try:
@@ -46,10 +44,12 @@ def analyze_multi_timeframe(symbol):
     if df_4h is None or df_1h is None or df_5m is None:
         return "📉 Data tidak lengkap untuk analisis multi-timeframe.", "NONE"
 
+    # EMA Trend 4H
     df_4h['EMA50'] = ta.trend.ema_indicator(df_4h['close'], window=50)
     df_4h['EMA200'] = ta.trend.ema_indicator(df_4h['close'], window=200)
     long_term_trend = "Bullish" if df_4h['EMA50'].iloc[-1] > df_4h['EMA200'].iloc[-1] else "Bearish"
 
+    # RSI, MACD, ADX di 1H
     df_1h['RSI'] = ta.momentum.rsi(df_1h['close'], window=14)
     macd = ta.trend.MACD(df_1h['close'])
     df_1h['MACD'] = macd.macd()
@@ -64,6 +64,7 @@ def analyze_multi_timeframe(symbol):
     elif long_term_trend == "Bearish" and last_1h['MACD'] < last_1h['MACD_SIGNAL'] and last_1h['RSI'] < 50:
         signal = "SHORT"
 
+    # Entry dari BB 5M
     bb_5m = ta.volatility.BollingerBands(df_5m['close'])
     df_5m['BB_L'] = bb_5m.bollinger_lband()
     df_5m['BB_H'] = bb_5m.bollinger_hband()
@@ -89,22 +90,22 @@ def analyze_multi_timeframe(symbol):
 ⏰ TF Utama: 4H | Konfirmasi: 1H | Entry: 5M
 
 📈 Trend 4H: {long_term_trend}
-📌 RSI 1H: {round(last_1h['RSI'],1)}
+📌 RSI 1H: {round(last_1h['RSI'], 1)}
 📌 MACD: {"Bullish" if last_1h['MACD'] > last_1h['MACD_SIGNAL'] else "Bearish"}
-📌 ADX: {round(last_1h['ADX'],1)}
+📌 ADX: {round(last_1h['ADX'], 1)}
 
 📤 Sinyal Final: {'✅ ' + signal if signal != 'NONE' else '⛔ Tidak valid'}
 💰 Harga Saat Ini: ${format_price(current_price)}
 """
 
-if signal != "NONE":
-    result += f"""
+    if signal != "NONE":
+        result += f"""
 🎯 Entry (BB 5M): {format_price(entry)}
 🛡️ Stop Loss: {format_price(support)}
 🎯 Take Profit: {format_price(resistance)}
 """
 
-return result.strip(), signal
+    return result.strip(), signal
 
 def generate_chart(symbol, signal_type="NONE"):
     df = get_klines(symbol, interval="1h", limit=100)
@@ -167,6 +168,7 @@ def webhook():
                     markup.add(button)
                     TELEGRAM_BOT.send_message(chat_id, "Klik tombol di bawah untuk buka di aplikasi Binance:", reply_markup=markup)
             except Exception as e:
+                print(f"[Webhook Error] {e}")
                 TELEGRAM_BOT.send_message(chat_id, f"Error analisis: {e}")
         else:
             TELEGRAM_BOT.send_message(chat_id, "Format simbol tidak valid atau terlalu pendek.")
@@ -175,4 +177,3 @@ def webhook():
 if __name__ == '__main__':
     port = int(os.getenv("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
-
