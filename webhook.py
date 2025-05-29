@@ -20,14 +20,6 @@ BINANCE_API_SECRET = os.getenv("BINANCE_API_SECRET")
 
 client = Client(BINANCE_API_KEY, BINANCE_API_SECRET)
 
-# Validasi symbol sederhana, bisa diperluas sesuai kebutuhan
-def is_valid_symbol(sym):
-    try:
-        info = client.get_symbol_info(sym)
-        return info is not None
-    except Exception:
-        return False
-
 def get_klines(symbol, interval=Client.KLINE_INTERVAL_5MINUTE, limit=100):
     try:
         raw = client.get_klines(symbol=symbol, interval=interval, limit=limit)
@@ -44,11 +36,32 @@ def get_klines(symbol, interval=Client.KLINE_INTERVAL_5MINUTE, limit=100):
         print(f"Error get_klines: {e}")
         return None
 
+def get_klines_1m(symbol, limit=100):
+    try:
+        raw = client.get_klines(symbol=symbol, interval=Client.KLINE_INTERVAL_1MINUTE, limit=limit)
+        df = pd.DataFrame(raw, columns=[
+            'timestamp', 'open', 'high', 'low', 'close', 'volume',
+            'close_time', 'quote_asset_volume', 'number_of_trades',
+            'taker_buy_base', 'taker_buy_quote', 'ignore'
+        ])
+        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+        df.set_index('timestamp', inplace=True)
+        df = df.astype(float)
+        return df[['open', 'high', 'low', 'close', 'volume']]
+    except Exception as e:
+        print(f"Error get_klines_1m: {e}")
+        return None
+
 def analyze_pair(symbol):
     df = get_klines(symbol)
     if df is None or df.empty:
-        return "Data tidak tersedia.", "NONE"
+        return "Data 5 menit tidak tersedia.", "NONE"
 
+    df_1m = get_klines_1m(symbol)
+    if df_1m is None or df_1m.empty:
+        return "Data 1 menit tidak tersedia.", "NONE"
+
+    # Hitung indikator di 5m
     df['EMA20'] = ta.trend.ema_indicator(df['close'], window=20)
     df['EMA50'] = ta.trend.ema_indicator(df['close'], window=50)
     df['RSI'] = ta.momentum.rsi(df['close'], window=14)
@@ -59,6 +72,11 @@ def analyze_pair(symbol):
     bb = ta.volatility.BollingerBands(df['close'])
     df['BB_H'] = bb.bollinger_hband()
     df['BB_L'] = bb.bollinger_lband()
+
+    # Bollinger Bands 1m untuk entry price
+    bb_1m = ta.volatility.BollingerBands(df_1m['close'])
+    df_1m['BB_H'] = bb_1m.bollinger_hband()
+    df_1m['BB_L'] = bb_1m.bollinger_lband()
 
     last = df.iloc[-1]
     current_price = last['close']
@@ -84,35 +102,28 @@ def analyze_pair(symbol):
     elif trend == "Bearish" and last['MACD'] < last['MACD_SIGNAL'] and last['RSI'] < 50:
         signal = "SHORT"
 
-    # Fix supaya SL dan TP tidak sama dengan entry price:
-    # Beri jarak minimal 0.1% dari entry (atau harga support/resistance yg lebih konservatif)
+    # Fungsi bantu adjust SL dan TP supaya tidak terlalu dekat entry
     def adjust_levels(entry, sl, tp):
-        if abs(entry - sl) < entry * 0.001:  # < 0.1%
-            if sl < entry:
-                sl = entry * 0.999  # 0.1% bawah
-            else:
-                sl = entry * 1.001  # 0.1% atas
+        if abs(entry - sl) < entry * 0.001:
+            sl = sl * (0.999 if sl < entry else 1.001)
         if abs(tp - entry) < entry * 0.001:
-            if tp > entry:
-                tp = entry * 1.001
-            else:
-                tp = entry * 0.999
+            tp = tp * (1.001 if tp > entry else 0.999)
         return round(sl,8), round(tp,8)
 
+    # Tentukan entry price pakai BB 1m
     if signal == "LONG":
-        entry = current_price
+        entry = df_1m['BB_L'].iloc[-1]
         sl, tp = adjust_levels(entry, support, resistance)
     elif signal == "SHORT":
-        entry = current_price
+        entry = df_1m['BB_H'].iloc[-1]
         sl, tp = adjust_levels(entry, resistance, support)
     else:
         entry = sl = tp = "-"
 
-    # Format harga sesuai simbol agar presisi tampilannya sesuai
+    # Fungsi format harga
     def format_price(price):
         if price == "-":
             return price
-        # cari decimals (misal ARBUSDT biasanya 6-8 decimal)
         dec = 8 if 'USDT' in symbol else 4
         return f"{price:.{dec}f}"
 
@@ -144,46 +155,33 @@ def analyze_pair(symbol):
     return result.strip(), signal
 
 def generate_chart(symbol):
-    try:
-        df = get_klines(symbol)
-        if df is None or df.empty:
-            return None
-
-        df['EMA20'] = ta.trend.ema_indicator(df['close'], window=20)
-        df['EMA50'] = ta.trend.ema_indicator(df['close'], window=50)
-
-        last_close = float(df['close'].iloc[-1]) if pd.notna(df['close'].iloc[-1]) else np.nan
-        bullish = df['EMA20'].iloc[-1] > df['EMA50'].iloc[-1]
-        signal_marker = [np.nan] * (len(df) - 1) + [last_close]
-
-        addplot = [
-            mpf.make_addplot(df['EMA20'], color='green'),
-            mpf.make_addplot(df['EMA50'], color='red'),
-            mpf.make_addplot(signal_marker, type='scatter', markersize=150,
-                             marker='^' if bullish else 'v',
-                             color='blue')
-        ]
-
-        fig, ax = mpf.plot(
-            df,
-            type='candle',
-            style='yahoo',
-            addplot=addplot,
-            volume=True,
-            returnfig=True,
-            figsize=(9, 6),
-            title=f"{symbol} - Future Signal Pro"
-        )
-
-        buf = BytesIO()
-        fig.savefig(buf, format="png", bbox_inches="tight")
-        plt.close(fig)
-        buf.seek(0)
-        return buf
-
-    except Exception as e:
-        print(f"Error generate_chart: {e}")
+    df = get_klines(symbol)
+    if df is None or df.empty:
         return None
+
+    df['EMA20'] = ta.trend.ema_indicator(df['close'], window=20)
+    df['EMA50'] = ta.trend.ema_indicator(df['close'], window=50)
+    addplot = [
+        mpf.make_addplot(df['EMA20'], color='green'),
+        mpf.make_addplot(df['EMA50'], color='red')
+    ]
+
+    fig, ax = mpf.plot(
+        df,
+        type='candle',
+        style='yahoo',
+        addplot=addplot,
+        volume=True,
+        returnfig=True,
+        figsize=(8,6),
+        title=f"{symbol} - 5m"
+    )
+
+    buf = BytesIO()
+    fig.savefig(buf, format="png")
+    plt.close(fig)
+    buf.seek(0)
+    return buf
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
@@ -192,12 +190,8 @@ def webhook():
         text = data["message"]["text"].strip().upper()
         chat_id = data["message"]["chat"]["id"]
 
-        # Filter hanya symbol valid supaya tidak error
-        if not is_valid_symbol(text):
-            TELEGRAM_BOT.send_message(chat_id, "Symbol tidak valid atau tidak ditemukan di Binance.")
-            return "OK"
-
-        if len(text) >= 6:
+        # Validasi simbol (minimal 6 karakter dan alfanumerik)
+        if len(text) >= 6 and text.isalnum():
             try:
                 message, signal = analyze_pair(text)
                 TELEGRAM_BOT.send_message(chat_id, message, parse_mode="Markdown")
@@ -207,7 +201,6 @@ def webhook():
                     if chart:
                         TELEGRAM_BOT.send_photo(chat_id, chart)
 
-                    # Tombol menuju aplikasi Binance dengan referral
                     markup = InlineKeyboardMarkup()
                     button = InlineKeyboardButton(
                         text=f"Buka {text} di Binance 📲",
@@ -218,6 +211,8 @@ def webhook():
 
             except Exception as e:
                 TELEGRAM_BOT.send_message(chat_id, f"Error analisis: {e}")
+        else:
+            TELEGRAM_BOT.send_message(chat_id, "Format simbol tidak valid atau terlalu pendek.")
     return "OK"
 
 if __name__ == '__main__':
