@@ -71,14 +71,19 @@ def analyze_pair(symbol):
     elif trend == "Bearish" and last['MACD'] < last['MACD_SIGNAL'] and last['RSI'] < 50:
         signal = "SHORT"
 
+    # Penyesuaian SL dan TP agar tidak sama dengan entry
     if signal == "LONG":
         entry = current_price
-        sl = support
-        tp = resistance
+        sl = min(support, entry * 0.98)
+        tp = max(resistance, entry * 1.02)
+        if abs(tp - entry) / entry < 0.002:  # <0.2%
+            tp = round(entry * 1.02, 6)
     elif signal == "SHORT":
         entry = current_price
-        sl = resistance
-        tp = support
+        sl = max(resistance, entry * 1.02)
+        tp = min(support, entry * 0.98)
+        if abs(entry - tp) / entry < 0.002:
+            tp = round(entry * 0.98, 6)
     else:
         entry = sl = tp = "-"
 
@@ -102,28 +107,22 @@ def analyze_pair(symbol):
 """
     return result.strip(), signal
 
-def generate_chart(symbol, signal=None):
+def generate_chart(symbol):
     df = get_klines(symbol)
     if df is None:
         return None
 
     df['EMA20'] = ta.trend.ema_indicator(df['close'], window=20)
     df['EMA50'] = ta.trend.ema_indicator(df['close'], window=50)
+    last = df.iloc[-1]
 
     addplot = [
         mpf.make_addplot(df['EMA20'], color='green'),
-        mpf.make_addplot(df['EMA50'], color='red')
+        mpf.make_addplot(df['EMA50'], color='red'),
+        mpf.make_addplot([None]*(len(df)-1) + [last['close']], type='scatter', markersize=200, marker='^' if last['EMA20'] > last['EMA50'] else 'v', color='blue')
     ]
 
-    last_idx = df.index[-1]
-    last_close = df['close'].iloc[-1]
-    signal_annotation = ""
-    if signal == "LONG":
-        signal_annotation = '📈 BUY SIGNAL'
-    elif signal == "SHORT":
-        signal_annotation = '📉 SELL SIGNAL'
-
-    fig, axlist = mpf.plot(
+    fig, ax = mpf.plot(
         df,
         type='candle',
         style='yahoo',
@@ -131,19 +130,8 @@ def generate_chart(symbol, signal=None):
         volume=True,
         returnfig=True,
         figsize=(8,6),
-        title=f"{symbol} - 5m (Signal Future Pro)"
+        title=f"{symbol} - Future Signal Pro"
     )
-
-    ax = axlist[0]
-    if signal_annotation:
-        ax.annotate(
-            signal_annotation,
-            xy=(last_idx, last_close),
-            xytext=(last_idx, last_close * 1.01 if signal == "LONG" else last_close * 0.99),
-            fontsize=12,
-            color='blue' if signal == "LONG" else 'red',
-            arrowprops=dict(facecolor='green' if signal == "LONG" else 'red', arrowstyle="->")
-        )
 
     buf = BytesIO()
     fig.savefig(buf, format="png")
@@ -164,7 +152,7 @@ def webhook():
                 TELEGRAM_BOT.send_message(chat_id, message, parse_mode="Markdown")
 
                 if signal != "NONE":
-                    chart = generate_chart(text, signal=signal)
+                    chart = generate_chart(text)
                     if chart:
                         TELEGRAM_BOT.send_photo(chat_id, chart)
 
