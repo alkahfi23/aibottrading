@@ -52,9 +52,9 @@ def analyze_pair(symbol):
     df['BB_L'] = bb.bollinger_lband()
 
     last = df.iloc[-1]
-    current_price = round(last['close'], 2)
-    support = round(df['low'][-20:].min(), 2)
-    resistance = round(df['high'][-20:].max(), 2)
+    current_price = last['close']
+    support = df['low'][-20:].min()
+    resistance = df['high'][-20:].max()
 
     avg_volume = df['volume'].rolling(window=20).mean()
     volume_spike = last['volume'] > avg_volume.iloc[-1] * 1.5
@@ -102,19 +102,28 @@ def analyze_pair(symbol):
 """
     return result.strip(), signal
 
-def generate_chart(symbol):
+def generate_chart(symbol, signal=None):
     df = get_klines(symbol)
     if df is None:
         return None
 
     df['EMA20'] = ta.trend.ema_indicator(df['close'], window=20)
     df['EMA50'] = ta.trend.ema_indicator(df['close'], window=50)
+
     addplot = [
         mpf.make_addplot(df['EMA20'], color='green'),
         mpf.make_addplot(df['EMA50'], color='red')
     ]
 
-    fig, ax = mpf.plot(
+    last_idx = df.index[-1]
+    last_close = df['close'].iloc[-1]
+    signal_annotation = ""
+    if signal == "LONG":
+        signal_annotation = '📈 BUY SIGNAL'
+    elif signal == "SHORT":
+        signal_annotation = '📉 SELL SIGNAL'
+
+    fig, axlist = mpf.plot(
         df,
         type='candle',
         style='yahoo',
@@ -122,8 +131,19 @@ def generate_chart(symbol):
         volume=True,
         returnfig=True,
         figsize=(8,6),
-        title=f"{symbol} - 5m"
+        title=f"{symbol} - 5m (Signal Future Pro)"
     )
+
+    ax = axlist[0]
+    if signal_annotation:
+        ax.annotate(
+            signal_annotation,
+            xy=(last_idx, last_close),
+            xytext=(last_idx, last_close * 1.01 if signal == "LONG" else last_close * 0.99),
+            fontsize=12,
+            color='blue' if signal == "LONG" else 'red',
+            arrowprops=dict(facecolor='green' if signal == "LONG" else 'red', arrowstyle="->")
+        )
 
     buf = BytesIO()
     fig.savefig(buf, format="png")
@@ -144,11 +164,10 @@ def webhook():
                 TELEGRAM_BOT.send_message(chat_id, message, parse_mode="Markdown")
 
                 if signal != "NONE":
-                    chart = generate_chart(text)
+                    chart = generate_chart(text, signal=signal)
                     if chart:
                         TELEGRAM_BOT.send_photo(chat_id, chart)
 
-                    # Tombol menuju aplikasi Binance
                     markup = InlineKeyboardMarkup()
                     button = InlineKeyboardButton(
                         text=f"Buka {text} di Binance 📲",
