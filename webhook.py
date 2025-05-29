@@ -20,6 +20,11 @@ BINANCE_API_SECRET = os.getenv("BINANCE_API_SECRET")
 
 client = Client(BINANCE_API_KEY, BINANCE_API_SECRET)
 
+POPULAR_SYMBOLS = [
+    "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT",
+    "ADAUSDT", "AVAXUSDT", "DOGEUSDT", "DOTUSDT", "MATICUSDT"
+]
+
 def get_klines(symbol, interval="5m", limit=100):
     try:
         raw = client.get_klines(symbol=symbol, interval=interval, limit=limit)
@@ -53,40 +58,38 @@ def analyze_multi_timeframe(symbol):
     df_1h['MACD'] = macd.macd()
     df_1h['MACD_SIGNAL'] = macd.macd_signal()
     df_1h['ADX'] = ta.trend.adx(df_1h['high'], df_1h['low'], df_1h['close'], window=14)
-    df_1h['ATR'] = ta.volatility.average_true_range(df_1h['high'], df_1h['low'], df_1h['close'], window=14)
+
+    df_1h['VolumeSpike'] = df_1h['volume'] > df_1h['volume'].rolling(window=20).mean() * 1.5
 
     last_1h = df_1h.iloc[-1]
     signal = "NONE"
 
-    df_5m['BB_L'] = ta.volatility.BollingerBands(df_5m['close']).bollinger_lband()
-    df_5m['BB_H'] = ta.volatility.BollingerBands(df_5m['close']).bollinger_hband()
-    df_5m['MFI'] = ta.volume.money_flow_index(df_5m['high'], df_5m['low'], df_5m['close'], df_5m['volume'], window=14)
-
-    df_5m['Volume_SMA'] = df_5m['volume'].rolling(window=20).mean()
-    df_5m['Volume_Spike'] = df_5m['volume'] > 1.5 * df_5m['Volume_SMA']
-
-    last_5m = df_5m.iloc[-1]
-    volume_spike = last_5m['Volume_Spike']
-
-    if long_term_trend == "Bullish" and last_1h['MACD'] > last_1h['MACD_SIGNAL'] and last_1h['RSI'] > 50 and last_5m['MFI'] > 50 and volume_spike:
+    if long_term_trend == "Bullish" and last_1h['MACD'] > last_1h['MACD_SIGNAL'] and last_1h['RSI'] > 50:
         signal = "LONG"
-    elif long_term_trend == "Bearish" and last_1h['MACD'] < last_1h['MACD_SIGNAL'] and last_1h['RSI'] < 50 and last_5m['MFI'] < 50 and volume_spike:
+    elif long_term_trend == "Bearish" and last_1h['MACD'] < last_1h['MACD_SIGNAL'] and last_1h['RSI'] < 50:
         signal = "SHORT"
 
-    entry = stop_loss = take_profit = "-"
+    bb_5m = ta.volatility.BollingerBands(df_5m['close'])
+    df_5m['BB_L'] = bb_5m.bollinger_lband()
+    df_5m['BB_H'] = bb_5m.bollinger_hband()
+
+    entry = None
+    stop_loss = None
+    take_profit = None
+
     if signal == "LONG":
-        entry = last_5m['BB_L']
-        stop_loss = entry - last_1h['ATR']
+        entry = df_5m['BB_L'].iloc[-1]
+        stop_loss = entry * 0.985
         take_profit = entry + (entry - stop_loss) * 1.5
     elif signal == "SHORT":
-        entry = last_5m['BB_H']
-        stop_loss = entry + last_1h['ATR']
+        entry = df_5m['BB_H'].iloc[-1]
+        stop_loss = entry * 1.015
         take_profit = entry - (stop_loss - entry) * 1.5
 
     current_price = df_1h['close'].iloc[-1]
 
     def format_price(p):
-        if p == "-" or p is None:
+        if p is None:
             return "-"
         dec = 8 if 'USDT' in symbol else 4
         return f"{p:.{dec}f}"
@@ -99,7 +102,7 @@ def analyze_multi_timeframe(symbol):
 📌 RSI 1H: {round(last_1h['RSI'],1)}
 📌 MACD: {'Bullish' if last_1h['MACD'] > last_1h['MACD_SIGNAL'] else 'Bearish'}
 📌 ADX: {round(last_1h['ADX'],1)}
-📊 Volume Spike: {'✅' if volume_spike else '❌'}
+📌 Volume Spike: {'Ya' if last_1h['VolumeSpike'] else 'Tidak'}
 
 📄 Sinyal Final: {'✅ ' + signal if signal != 'NONE' else '⛔ Tidak valid'}
 💰 Harga Saat Ini: ${format_price(current_price)}
@@ -108,7 +111,7 @@ def analyze_multi_timeframe(symbol):
     if signal != "NONE":
         result += f"""
 🎯 Entry (BB 5M): {format_price(entry)}
-🛡️ Stop Loss (ATR): {format_price(stop_loss)}
+🛡️ Stop Loss: {format_price(stop_loss)}
 🎯 Take Profit: {format_price(take_profit)}
 """
 
@@ -121,8 +124,6 @@ def generate_chart(symbol, signal_type="NONE", entry_price=None):
 
     df['EMA50'] = ta.trend.ema_indicator(df['close'], window=50)
     df['EMA200'] = ta.trend.ema_indicator(df['close'], window=200)
-
-    last_price = df['close'].iloc[-1]
 
     addplot = [
         mpf.make_addplot(df['EMA50'], color='green'),
@@ -156,6 +157,33 @@ def webhook():
     if "message" in data and "text" in data["message"]:
         text = data["message"]["text"].strip().upper()
         chat_id = data["message"]["chat"]["id"]
+
+        if text in ["LONG", "SHORT"]:
+            found = False
+            TELEGRAM_BOT.send_message(chat_id, f"🔍 Mencari sinyal `{text}` di 10 coin populer...", parse_mode="Markdown")
+            for symbol in POPULAR_SYMBOLS:
+                try:
+                    message, signal, entry = analyze_multi_timeframe(symbol)
+                    if signal == text:
+                        TELEGRAM_BOT.send_message(chat_id, message, parse_mode="Markdown")
+                        chart = generate_chart(symbol, signal, entry)
+                        if chart:
+                            TELEGRAM_BOT.send_photo(chat_id, chart)
+
+                        markup = InlineKeyboardMarkup()
+                        button = InlineKeyboardButton(
+                            text=f"Buka {symbol} di Binance 📲",
+                            url=f"https://www.binance.com/en/futures/{symbol}?ref=GRO_16987_24H8Y"
+                        )
+                        markup.add(button)
+                        TELEGRAM_BOT.send_message(chat_id, "Klik tombol di bawah untuk buka di aplikasi Binance:", reply_markup=markup)
+                        found = True
+                except Exception as e:
+                    print(f"Error cek {symbol}: {e}")
+
+            if not found:
+                TELEGRAM_BOT.send_message(chat_id, f"❌ Tidak ditemukan sinyal `{text}` saat ini.", parse_mode="Markdown")
+            return "OK"
 
         if len(text) >= 6 and text.isalnum():
             try:
