@@ -27,7 +27,7 @@ POPULAR_SYMBOLS = [
 
 def get_klines(symbol, interval="1m", limit=100):
     try:
-        data = BINANCE_CLIENT.klines(symbol=symbol, interval=interval, limit=limit)
+        data = client.klines(symbol=symbol, interval=interval, limit=limit)
         if not data:
             raise ValueError("Klines kosong")
         df = pd.DataFrame(data, columns=[
