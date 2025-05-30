@@ -6,3 +6,6 @@ python-telegram-bot
 python-binance
 ta
 pyTelegramBotAPI
+binance-futures-connector
+websockets 
+asyncio
