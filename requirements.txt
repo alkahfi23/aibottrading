@@ -3,6 +3,7 @@ matplotlib
 mplfinance
 pandas
 python-telegram-bot
+python-binance
 ta
 pyTelegramBotAPI
-binance-connector
+
