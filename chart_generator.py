@@ -12,7 +12,7 @@ BINANCE_API_KEY = os.getenv("BINANCE_API_KEY")
 BINANCE_API_SECRET = os.getenv("BINANCE_API_SECRET")
 client = Client(BINANCE_API_KEY, BINANCE_API_SECRET)
 
-def get_klines(symbol, interval="1h", limit=100):
+def get_klines(symbol, interval="1h", limit=250):
     try:
         raw = client.get_klines(symbol=symbol, interval=interval, limit=limit)
         if not raw:
@@ -28,7 +28,6 @@ def get_klines(symbol, interval="1h", limit=100):
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
         df.set_index('timestamp', inplace=True)
 
-        # Pastikan semua kolom numerik benar
         numeric_cols = ['open', 'high', 'low', 'close', 'volume']
         df[numeric_cols] = df[numeric_cols].astype(float)
 
@@ -38,9 +37,9 @@ def get_klines(symbol, interval="1h", limit=100):
         return None
 
 def generate_chart(symbol, signal_type="NONE", entry_price=None):
-    df = get_klines(symbol, interval="1h", limit=100)
-    if df is None or df.empty or df.shape[0] < 50:
-        print("⚠️ Data tidak cukup untuk chart (minimal 50 bar).")
+    df = get_klines(symbol, interval="1h", limit=250)
+    if df is None or df.empty or df.shape[0] < 200:
+        print("⚠️ Data tidak cukup untuk chart (minimal 200 bar).")
         return None
 
     try:
@@ -57,7 +56,8 @@ def generate_chart(symbol, signal_type="NONE", entry_price=None):
             marker_color = 'green' if signal_type == "LONG" else 'red'
             marker_array = [np.nan] * (len(df) - 1) + [entry_price]
             addplot.append(
-                mpf.make_addplot(marker_array, type='scatter', markersize=100, marker=marker_symbol, color=marker_color)
+                mpf.make_addplot(marker_array, type='scatter', markersize=100,
+                                 marker=marker_symbol, color=marker_color)
             )
 
         fig, ax = mpf.plot(
