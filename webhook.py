@@ -1,15 +1,13 @@
 from flask import Flask, request
 import os
-import matplotlib.pyplot as plt
-import mplfinance as mpf
 import pandas as pd
 import numpy as np
 import ta
 import telebot
 from datetime import datetime
 from binance.client import Client
-from io import BytesIO
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+from chart_generator import generate_chart  # Import chart dari file terpisah
 
 app = Flask(__name__)
 
@@ -60,7 +58,6 @@ def analyze_multi_timeframe(symbol):
     df_1h['MACD'] = macd.macd()
     df_1h['MACD_SIGNAL'] = macd.macd_signal()
     df_1h['ADX'] = ta.trend.adx(df_1h['high'], df_1h['low'], df_1h['close'], window=14)
-
     df_1h['VolumeSpike'] = df_1h['volume'] > df_1h['volume'].rolling(window=20).mean() * 1.5
 
     last_1h = df_1h.iloc[-1]
@@ -75,9 +72,7 @@ def analyze_multi_timeframe(symbol):
     df_5m['BB_L'] = bb_5m.bollinger_lband()
     df_5m['BB_H'] = bb_5m.bollinger_hband()
 
-    entry = None
-    stop_loss = None
-    take_profit = None
+    entry = stop_loss = take_profit = None
 
     if signal == "LONG":
         entry = df_5m['BB_L'].iloc[-1]
@@ -116,46 +111,7 @@ def analyze_multi_timeframe(symbol):
 🛡️ Stop Loss: {format_price(stop_loss)}
 🎯 Take Profit: {format_price(take_profit)}
 """
-
     return result.strip(), signal, entry
-
-def generate_chart(symbol, signal_type="NONE", entry_price=None):
-    df = get_klines(symbol, interval="1h", limit=100)
-    if df is None or df.empty:
-        return None
-
-    df['EMA50'] = ta.trend.ema_indicator(df['close'], window=50)
-    df['EMA200'] = ta.trend.ema_indicator(df['close'], window=200)
-
-    addplot = [
-        mpf.make_addplot(df['EMA50'], color='green'),
-        mpf.make_addplot(df['EMA200'], color='red')
-    ]
-
-    if signal_type == "LONG" and entry_price:
-        addplot.append(mpf.make_addplot([np.nan]*(len(df)-1) + [entry_price],
-                                        type='scatter', markersize=100, marker='^', color='green'))
-    elif signal_type == "SHORT" and entry_price:
-        addplot.append(mpf.make_addplot([np.nan]*(len(df)-1) + [entry_price],
-                                        type='scatter', markersize=100, marker='v', color='red'))
-
-    try:
-        fig, ax = mpf.plot(
-            df, type='candle', style='yahoo', addplot=addplot,
-            volume=True, returnfig=True, figsize=(8, 6),
-            title=f"{symbol} - Signal Future Pro"
-        )
-        ax[0].text(0.02, 0.95, "Signal Future Pro", transform=ax[0].transAxes,
-                   fontsize=14, fontweight='bold', color='blue', bbox=dict(facecolor='white', alpha=0.7))
-
-        buf = BytesIO()
-        fig.savefig(buf, format="png")
-        plt.close(fig)
-        buf.seek(0)
-        return buf
-    except Exception as e:
-        print(f"Error generate_chart: {e}")
-        return None
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
