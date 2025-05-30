@@ -14,7 +14,7 @@ from io import BytesIO
 from datetime import datetime
 from telebot import TeleBot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-from binance.um_futures import UMFutures
+from binance.client import Client
 
 # Load API Keys
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
