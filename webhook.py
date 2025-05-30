@@ -201,7 +201,7 @@ def webhook():
 
             if not found:
                 TELEGRAM_BOT.send_message(chat_id, f"❌ Tidak ditemukan sinyal `{text}` saat ini.", parse_mode="Markdown")
-            return "OK"
+    return "OK"
 
        
 if __name__ == '__main__':
