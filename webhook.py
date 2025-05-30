@@ -25,32 +25,31 @@ POPULAR_SYMBOLS = [
     "ADAUSDT", "AVAXUSDT", "DOGEUSDT", "DOTUSDT", "MATICUSDT"
 ]
 
-def get_klines(symbol, interval="1m", limit=100):
+def get_klines(symbol, interval="5m", limit=100):
     try:
-        data = client.klines(symbol=symbol, interval=interval, limit=limit)
-        if not data:
-            raise ValueError("Klines kosong")
-        df = pd.DataFrame(data, columns=[
-            'timestamp', 'open', 'high', 'low', 'close',
-            'volume', 'close_time', 'quote_asset_volume',
-            'num_trades', 'taker_base_vol', 'taker_quote_vol', 'ignore'
+        raw = client.get_klines(symbol=symbol, interval=interval, limit=limit)
+        if not raw:
+            return None
+        df = pd.DataFrame(raw, columns=[
+            'timestamp', 'open', 'high', 'low', 'close', 'volume',
+            'close_time', 'quote_asset_volume', 'number_of_trades',
+            'taker_buy_base', 'taker_buy_quote', 'ignore'
         ])
-        df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-        df[['open', 'high', 'low', 'close', 'volume']] = df[['open', 'high', 'low', 'close', 'volume']].astype(float)
-        return df
+        df.set_index('timestamp', inplace=True)
+        df = df.astype(float)
+        return df[['open', 'high', 'low', 'close', 'volume']]
     except Exception as e:
-        print(f"[get_klines] Error ambil data untuk {symbol}: {e}")
-        return pd.DataFrame()
+        print(f"Error get_klines ({interval}): {e}")
+        return None
 
 def analyze_multi_timeframe(symbol):
     df_4h = get_klines(symbol, interval="4h", limit=100)
     df_1h = get_klines(symbol, interval="1h", limit=100)
     df_5m = get_klines(symbol, interval="5m", limit=100)
 
-    for df, tf in zip([df_4h, df_1h, df_5m], ["4h", "1h", "5m"]):
-    if df.empty or 'close' not in df.columns:
-        return f"📉 Data {tf} tidak valid atau kosong untuk {symbol}.", "NONE", None
+    if df_4h is None or df_1h is None or df_5m is None:
+        return "📉 Data tidak lengkap untuk analisis multi-timeframe.", "NONE", None
 
     df_4h['EMA50'] = ta.trend.ema_indicator(df_4h['close'], window=50)
     df_4h['EMA200'] = ta.trend.ema_indicator(df_4h['close'], window=200)
@@ -120,33 +119,43 @@ def analyze_multi_timeframe(symbol):
 
     return result.strip(), signal, entry
 
-def generate_chart(symbol, signal, entry_price):
-    df = get_klines(symbol)
-    
-    # Validasi: Data kosong atau terlalu sedikit
-    if df.empty or len(df) < 20:
-        print(f"[generate_chart] Tidak cukup data untuk {symbol}")
+def generate_chart(symbol, signal_type="NONE", entry_price=None):
+    df = get_klines(symbol, interval="1h", limit=100)
+    if df is None or df.empty:
         return None
 
-    df.set_index("timestamp", inplace=True)
+    df['EMA50'] = ta.trend.ema_indicator(df['close'], window=50)
+    df['EMA200'] = ta.trend.ema_indicator(df['close'], window=200)
+
+    addplot = [
+        mpf.make_addplot(df['EMA50'], color='green'),
+        mpf.make_addplot(df['EMA200'], color='red')
+    ]
+
+    if signal_type == "LONG" and entry_price:
+        addplot.append(mpf.make_addplot([np.nan]*(len(df)-1) + [entry_price],
+                                        type='scatter', markersize=100, marker='^', color='green'))
+    elif signal_type == "SHORT" and entry_price:
+        addplot.append(mpf.make_addplot([np.nan]*(len(df)-1) + [entry_price],
+                                        type='scatter', markersize=100, marker='v', color='red'))
 
     try:
-        mc = mpf.make_marketcolors(up="g", down="r", inherit=True)
-        s = mpf.make_mpf_style(marketcolors=mc)
-        title = f"{symbol} - {signal} @ {format_price(symbol, entry_price)}"
-        fig, axlist = mpf.plot(
-            df[-60:], type="candle", style=s, title=title,
-            ylabel="Price", volume=True, returnfig=True
+        fig, ax = mpf.plot(
+            df, type='candle', style='yahoo', addplot=addplot,
+            volume=True, returnfig=True, figsize=(8, 6),
+            title=f"{symbol} - Signal Future Pro"
         )
+        ax[0].text(0.02, 0.95, "Signal Future Pro", transform=ax[0].transAxes,
+                   fontsize=14, fontweight='bold', color='blue', bbox=dict(facecolor='white', alpha=0.7))
+
         buf = BytesIO()
-        fig.savefig(buf, format="png", bbox_inches="tight")
+        fig.savefig(buf, format="png")
+        plt.close(fig)
         buf.seek(0)
         return buf
     except Exception as e:
-        print(f"[generate_chart] Error plot chart {symbol}: {e}")
-        traceback.print_exc()
+        print(f"Error generate_chart: {e}")
         return None
-
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
