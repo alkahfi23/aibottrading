@@ -1,33 +1,42 @@
-from flask import Flask, request
 import os
-import matplotlib.pyplot as plt
-import mplfinance as mpf
+import asyncio
+import json
+import hmac
+import hashlib
+import time
+import requests
+import websockets
 import pandas as pd
 import numpy as np
 import ta
-import telebot
-from datetime import datetime
-from binance.client import Client
-from io import BytesIO
+import matplotlib.pyplot as plt
+import mplfinance as mpf
+from flask import Flask, request
+from telebot import TeleBot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+from io import BytesIO
+from datetime import datetime
+from binance.um_futures import UMFutures
 
+# Inisialisasi Flask dan TeleBot
 app = Flask(__name__)
-
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-TELEGRAM_BOT = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
+TELEGRAM_BOT = TeleBot(TELEGRAM_BOT_TOKEN)
+
+# Inisialisasi Binance Futures Client
 BINANCE_API_KEY = os.getenv("BINANCE_API_KEY")
 BINANCE_API_SECRET = os.getenv("BINANCE_API_SECRET")
-
-client = Client(BINANCE_API_KEY, BINANCE_API_SECRET)
+client = UMFutures(key=BINANCE_API_KEY, secret=BINANCE_API_SECRET)
 
 POPULAR_SYMBOLS = [
     "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT",
     "ADAUSDT", "AVAXUSDT", "DOGEUSDT", "DOTUSDT", "MATICUSDT"
 ]
 
+# Fungsi untuk mendapatkan data klines
 def get_klines(symbol, interval="5m", limit=100):
     try:
-        raw = client.get_klines(symbol=symbol, interval=interval, limit=limit)
+        raw = client.klines(symbol=symbol, interval=interval, limit=limit)
         if not raw:
             return None
         df = pd.DataFrame(raw, columns=[
@@ -43,6 +52,7 @@ def get_klines(symbol, interval="5m", limit=100):
         print(f"Error get_klines ({interval}): {e}")
         return None
 
+# Fungsi untuk analisis multi-timeframe
 def analyze_multi_timeframe(symbol):
     df_4h = get_klines(symbol, interval="4h", limit=100)
     df_1h = get_klines(symbol, interval="1h", limit=100)
@@ -119,6 +129,7 @@ def analyze_multi_timeframe(symbol):
 
     return result.strip(), signal, entry
 
+# Fungsi untuk menghasilkan chart
 def generate_chart(symbol, signal_type="NONE", entry_price=None):
     df = get_klines(symbol, interval="1h", limit=100)
     if df is None or df.empty:
@@ -157,6 +168,7 @@ def generate_chart(symbol, signal_type="NONE", entry_price=None):
         print(f"Error generate_chart: {e}")
         return None
 
+# Endpoint webhook untuk Telegram
 @app.route('/webhook', methods=['POST'])
 def webhook():
     data = request.get_json()
@@ -191,29 +203,6 @@ def webhook():
                 TELEGRAM_BOT.send_message(chat_id, f"❌ Tidak ditemukan sinyal `{text}` saat ini.", parse_mode="Markdown")
             return "OK"
 
-        if len(text) >= 6 and text.isalnum():
-            try:
-                message, signal, entry = analyze_multi_timeframe(text)
-                TELEGRAM_BOT.send_message(chat_id, message, parse_mode="Markdown")
-
-                if signal != "NONE":
-                    chart = generate_chart(text, signal, entry)
-                    if chart:
-                        TELEGRAM_BOT.send_photo(chat_id, chart)
-
-                    markup = InlineKeyboardMarkup()
-                    button = InlineKeyboardButton(
-                        text=f"Buka {text} di Binance 📲",
-                        url=f"https://www.binance.com/en/futures/{text}?ref=GRO_16987_24H8Y"
-                    )
-                    markup.add(button)
-                    TELEGRAM_BOT.send_message(chat_id, "Klik tombol di bawah untuk buka di aplikasi Binance:", reply_markup=markup)
-            except Exception as e:
-                TELEGRAM_BOT.send_message(chat_id, f"Error analisis: {e}")
-        else:
-            TELEGRAM_BOT.send_message(chat_id, "Format simbol tidak valid atau terlalu pendek.")
-    return "OK"
-
-if __name__ == '__main__':
-    port = int(os.getenv("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+       
+::contentReference[oaicite:0]{index=0}
+ 
