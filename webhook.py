@@ -42,48 +42,50 @@ def get_klines(symbol, interval="5m", limit=100):
         return None
 
 def analyze_multi_timeframe(symbol):
-    df_4h = get_klines(symbol, interval="4h", limit=100)
-    df_1h = get_klines(symbol, interval="1h", limit=100)
+    df_15m = get_klines(symbol, interval="15m", limit=100)
     df_5m = get_klines(symbol, interval="5m", limit=100)
+    df_1m = get_klines(symbol, interval="1m", limit=100)
 
-    if df_4h is None or df_1h is None or df_5m is None:
+    if df_15m is None or df_5m is None or df_1m is None:
         return "📉 Data tidak lengkap untuk analisis multi-timeframe.", "NONE", None
 
-    df_4h['EMA50'] = ta.trend.ema_indicator(df_4h['close'], window=50)
-    df_4h['EMA200'] = ta.trend.ema_indicator(df_4h['close'], window=200)
-    long_term_trend = "Bullish" if df_4h['EMA50'].iloc[-1] > df_4h['EMA200'].iloc[-1] else "Bearish"
+    # TF utama: 15M
+    df_15m['EMA50'] = ta.trend.ema_indicator(df_15m['close'], window=50)
+    df_15m['EMA200'] = ta.trend.ema_indicator(df_15m['close'], window=200)
+    trend_utama = "Bullish" if df_15m['EMA50'].iloc[-1] > df_15m['EMA200'].iloc[-1] else "Bearish"
 
-    df_1h['RSI'] = ta.momentum.rsi(df_1h['close'], window=14)
-    macd = ta.trend.MACD(df_1h['close'])
-    df_1h['MACD'] = macd.macd()
-    df_1h['MACD_SIGNAL'] = macd.macd_signal()
-    df_1h['ADX'] = ta.trend.adx(df_1h['high'], df_1h['low'], df_1h['close'], window=14)
-    df_1h['VolumeSpike'] = df_1h['volume'] > df_1h['volume'].rolling(window=20).mean() * 1.5
+    # Konfirmasi: 5M
+    df_5m['RSI'] = ta.momentum.rsi(df_5m['close'], window=14)
+    macd = ta.trend.MACD(df_5m['close'])
+    df_5m['MACD'] = macd.macd()
+    df_5m['MACD_SIGNAL'] = macd.macd_signal()
+    df_5m['ADX'] = ta.trend.adx(df_5m['high'], df_5m['low'], df_5m['close'], window=14)
+    df_5m['VolumeSpike'] = df_5m['volume'] > df_5m['volume'].rolling(window=20).mean() * 1.5
 
-    last_1h = df_1h.iloc[-1]
+    last_5m = df_5m.iloc[-1]
     signal = "NONE"
 
-    if long_term_trend == "Bullish" and last_1h['MACD'] > last_1h['MACD_SIGNAL'] and last_1h['RSI'] > 50:
+    if trend_utama == "Bullish" and last_5m['MACD'] > last_5m['MACD_SIGNAL'] and last_5m['RSI'] > 50:
         signal = "LONG"
-    elif long_term_trend == "Bearish" and last_1h['MACD'] < last_1h['MACD_SIGNAL'] and last_1h['RSI'] < 50:
+    elif trend_utama == "Bearish" and last_5m['MACD'] < last_5m['MACD_SIGNAL'] and last_5m['RSI'] < 50:
         signal = "SHORT"
 
-    bb_5m = ta.volatility.BollingerBands(df_5m['close'])
-    df_5m['BB_L'] = bb_5m.bollinger_lband()
-    df_5m['BB_H'] = bb_5m.bollinger_hband()
+    # Entry: 1M
+    bb_1m = ta.volatility.BollingerBands(df_1m['close'])
+    df_1m['BB_L'] = bb_1m.bollinger_lband()
+    df_1m['BB_H'] = bb_1m.bollinger_hband()
 
     entry = stop_loss = take_profit = None
-
     if signal == "LONG":
-        entry = df_5m['BB_L'].iloc[-1]
+        entry = df_1m['BB_L'].iloc[-1]
         stop_loss = entry * 0.985
         take_profit = entry + (entry - stop_loss) * 1.5
     elif signal == "SHORT":
-        entry = df_5m['BB_H'].iloc[-1]
+        entry = df_1m['BB_H'].iloc[-1]
         stop_loss = entry * 1.015
         take_profit = entry - (stop_loss - entry) * 1.5
 
-    current_price = df_1h['close'].iloc[-1]
+    current_price = df_1m['close'].iloc[-1]
 
     def format_price(p):
         if p is None:
@@ -93,13 +95,13 @@ def analyze_multi_timeframe(symbol):
 
     result = f"""
 📊 Pair: {symbol}
-⏰ TF Utama: 4H | Konfirmasi: 1H | Entry: 5M
+⏰ TF Utama: 15M | Konfirmasi: 5M | Entry: 1M
 
-📈 Trend 4H: {long_term_trend}
-📌 RSI 1H: {round(last_1h['RSI'],1)}
-📌 MACD: {'Bullish' if last_1h['MACD'] > last_1h['MACD_SIGNAL'] else 'Bearish'}
-📌 ADX: {round(last_1h['ADX'],1)}
-📌 Volume Spike: {'Ya' if last_1h['VolumeSpike'] else 'Tidak'}
+📈 Trend 15M: {trend_utama}
+📌 RSI 5M: {round(last_5m['RSI'],1)}
+📌 MACD: {'Bullish' if last_5m['MACD'] > last_5m['MACD_SIGNAL'] else 'Bearish'}
+📌 ADX: {round(last_5m['ADX'],1)}
+📌 Volume Spike: {'Ya' if last_5m['VolumeSpike'] else 'Tidak'}
 
 📄 Sinyal Final: {'✅ ' + signal if signal != 'NONE' else '⛔ Tidak valid'}
 💰 Harga Saat Ini: ${format_price(current_price)}
@@ -107,7 +109,7 @@ def analyze_multi_timeframe(symbol):
 
     if signal != "NONE":
         result += f"""
-🎯 Entry (BB 5M): {format_price(entry)}
+🎯 Entry (BB 1M): {format_price(entry)}
 🛡️ Stop Loss: {format_price(stop_loss)}
 🎯 Take Profit: {format_price(take_profit)}
 """
