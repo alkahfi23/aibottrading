@@ -25,23 +25,23 @@ POPULAR_SYMBOLS = [
     "ADAUSDT", "AVAXUSDT", "DOGEUSDT", "DOTUSDT", "MATICUSDT"
 ]
 
-def get_klines(symbol, interval="5m", limit=100):
+def get_klines(symbol, interval="1m", limit=100):
     try:
-        raw = client.get_klines(symbol=symbol, interval=interval, limit=limit)
-        if not raw:
-            return None
-        df = pd.DataFrame(raw, columns=[
-            'timestamp', 'open', 'high', 'low', 'close', 'volume',
-            'close_time', 'quote_asset_volume', 'number_of_trades',
-            'taker_buy_base', 'taker_buy_quote', 'ignore'
+        data = BINANCE_CLIENT.klines(symbol=symbol, interval=interval, limit=limit)
+        if not data:
+            raise ValueError("Klines kosong")
+        df = pd.DataFrame(data, columns=[
+            'timestamp', 'open', 'high', 'low', 'close',
+            'volume', 'close_time', 'quote_asset_volume',
+            'num_trades', 'taker_base_vol', 'taker_quote_vol', 'ignore'
         ])
+        df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-        df.set_index('timestamp', inplace=True)
-        df = df.astype(float)
-        return df[['open', 'high', 'low', 'close', 'volume']]
+        df[['open', 'high', 'low', 'close', 'volume']] = df[['open', 'high', 'low', 'close', 'volume']].astype(float)
+        return df
     except Exception as e:
-        print(f"Error get_klines ({interval}): {e}")
-        return None
+        print(f"[get_klines] Error ambil data untuk {symbol}: {e}")
+        return pd.DataFrame()
 
 def analyze_multi_timeframe(symbol):
     df_4h = get_klines(symbol, interval="4h", limit=100)
@@ -119,43 +119,33 @@ def analyze_multi_timeframe(symbol):
 
     return result.strip(), signal, entry
 
-def generate_chart(symbol, signal_type="NONE", entry_price=None):
-    df = get_klines(symbol, interval="1h", limit=100)
-    if df is None or df.empty:
+def generate_chart(symbol, signal, entry_price):
+    df = get_klines(symbol)
+    
+    # Validasi: Data kosong atau terlalu sedikit
+    if df.empty or len(df) < 20:
+        print(f"[generate_chart] Tidak cukup data untuk {symbol}")
         return None
 
-    df['EMA50'] = ta.trend.ema_indicator(df['close'], window=50)
-    df['EMA200'] = ta.trend.ema_indicator(df['close'], window=200)
-
-    addplot = [
-        mpf.make_addplot(df['EMA50'], color='green'),
-        mpf.make_addplot(df['EMA200'], color='red')
-    ]
-
-    if signal_type == "LONG" and entry_price:
-        addplot.append(mpf.make_addplot([np.nan]*(len(df)-1) + [entry_price],
-                                        type='scatter', markersize=100, marker='^', color='green'))
-    elif signal_type == "SHORT" and entry_price:
-        addplot.append(mpf.make_addplot([np.nan]*(len(df)-1) + [entry_price],
-                                        type='scatter', markersize=100, marker='v', color='red'))
+    df.set_index("timestamp", inplace=True)
 
     try:
-        fig, ax = mpf.plot(
-            df, type='candle', style='yahoo', addplot=addplot,
-            volume=True, returnfig=True, figsize=(8, 6),
-            title=f"{symbol} - Signal Future Pro"
+        mc = mpf.make_marketcolors(up="g", down="r", inherit=True)
+        s = mpf.make_mpf_style(marketcolors=mc)
+        title = f"{symbol} - {signal} @ {format_price(symbol, entry_price)}"
+        fig, axlist = mpf.plot(
+            df[-60:], type="candle", style=s, title=title,
+            ylabel="Price", volume=True, returnfig=True
         )
-        ax[0].text(0.02, 0.95, "Signal Future Pro", transform=ax[0].transAxes,
-                   fontsize=14, fontweight='bold', color='blue', bbox=dict(facecolor='white', alpha=0.7))
-
         buf = BytesIO()
-        fig.savefig(buf, format="png")
-        plt.close(fig)
+        fig.savefig(buf, format="png", bbox_inches="tight")
         buf.seek(0)
         return buf
     except Exception as e:
-        print(f"Error generate_chart: {e}")
+        print(f"[generate_chart] Error plot chart {symbol}: {e}")
+        traceback.print_exc()
         return None
+
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
