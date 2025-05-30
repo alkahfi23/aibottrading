@@ -48,8 +48,9 @@ def analyze_multi_timeframe(symbol):
     df_1h = get_klines(symbol, interval="1h", limit=100)
     df_5m = get_klines(symbol, interval="5m", limit=100)
 
-    if df_4h is None or df_1h is None or df_5m is None:
-        return "📉 Data tidak lengkap untuk analisis multi-timeframe.", "NONE", None
+    for df, tf in zip([df_4h, df_1h, df_5m], ["4h", "1h", "5m"]):
+    if df.empty or 'close' not in df.columns:
+        return f"📉 Data {tf} tidak valid atau kosong untuk {symbol}.", "NONE", None
 
     df_4h['EMA50'] = ta.trend.ema_indicator(df_4h['close'], window=50)
     df_4h['EMA200'] = ta.trend.ema_indicator(df_4h['close'], window=200)
