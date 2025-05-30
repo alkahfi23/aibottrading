@@ -47,29 +47,41 @@ def generate_chart(symbol, signal_type="NONE", entry_price=None):
         df['EMA200'] = ta.trend.ema_indicator(df['close'], window=200, fillna=True)
 
         addplot = [
-            mpf.make_addplot(df['EMA50'], color='green'),
-            mpf.make_addplot(df['EMA200'], color='red')
+            mpf.make_addplot(df['EMA50'], color='lime', width=1.2),
+            mpf.make_addplot(df['EMA200'], color='orangered', width=1.2),
         ]
 
         if signal_type in ["LONG", "SHORT"] and entry_price:
             marker_symbol = '^' if signal_type == "LONG" else 'v'
             marker_color = 'green' if signal_type == "LONG" else 'red'
-            marker_array = [np.nan] * (len(df) - 1) + [entry_price]
-            addplot.append(
-                mpf.make_addplot(marker_array, type='scatter', markersize=100,
-                                 marker=marker_symbol, color=marker_color)
-            )
 
+            # Taruh marker pada candle terakhir
+            marker_array = [np.nan] * (len(df) - 1) + [df['low'].iloc[-1] if signal_type == "LONG" else df['high'].iloc[-1]]
+            addplot.append(mpf.make_addplot(marker_array, type='scatter', markersize=150,
+                                            marker=marker_symbol, color=marker_color))
+
+            # Tambahkan garis horizontal di entry price
+            df['entry_line'] = entry_price
+            addplot.append(mpf.make_addplot(df['entry_line'], color='gray', linestyle='--', linewidth=1))
+
+        # Plot dengan mplfinance
         fig, ax = mpf.plot(
-            df, type='candle', style='yahoo', addplot=addplot,
-            volume=True, returnfig=True, figsize=(10, 6),
-            title=f"{symbol} - Signal Future Pro"
+            df,
+            type='candle',
+            style='charles',
+            addplot=addplot,
+            volume=True,
+            returnfig=True,
+            figsize=(10, 6),
+            title=f"{symbol} | {signal_type} @ {entry_price}" if signal_type in ["LONG", "SHORT"] else f"{symbol} - Signal Future Pro",
         )
 
+        # Watermark/info
         ax[0].text(0.02, 0.95, "Signal Future Pro", transform=ax[0].transAxes,
-                   fontsize=14, fontweight='bold', color='blue',
-                   bbox=dict(facecolor='white', alpha=0.7))
+                   fontsize=14, fontweight='bold', color='navy',
+                   bbox=dict(facecolor='white', edgecolor='blue', boxstyle='round,pad=0.5', alpha=0.7))
 
+        # Simpan ke buffer PNG
         buf = BytesIO()
         fig.savefig(buf, format="png")
         plt.close(fig)
