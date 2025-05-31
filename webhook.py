@@ -41,87 +41,81 @@ def get_klines(symbol, interval="5m", limit=100):
         print(f"Error get_klines ({interval}): {e}")
         return None
 
+def detect_reversal_candle(df):
+    """Deteksi pola candlestick pembalikan pada candle terakhir."""
+    patterns = {
+        'Hammer': talib.CDLHAMMER(df['open'], df['high'], df['low'], df['close']),
+        'InvertedHammer': talib.CDLINVERTEDHAMMER(df['open'], df['high'], df['low'], df['close']),
+        'Engulfing': talib.CDLENGULFING(df['open'], df['high'], df['low'], df['close']),
+        'ShootingStar': talib.CDLSHOOTINGSTAR(df['open'], df['high'], df['low'], df['close']),
+    }
+    last_idx = -1
+    for name, pattern in patterns.items():
+        if pattern.iloc[last_idx] != 0:
+            return name
+    return None
+
 def analyze_multi_timeframe(symbol):
-    df_15m = get_klines(symbol, interval="15m", limit=100)
-    df_5m = get_klines(symbol, interval="5m", limit=100)
-    df_1m = get_klines(symbol, interval="1m", limit=100)
+    df_15m = get_klines(symbol, '15m', 500)
+    df_5m = get_klines(symbol, '5m', 500)
+    df_1m = get_klines(symbol, '1m', 500)
 
-    if df_15m is None or df_5m is None or df_1m is None:
-        return "📉 Data tidak lengkap untuk analisis multi-timeframe.", "NONE", None
+    # Tambahkan indikator ke semua timeframe
+    for df in [df_15m, df_5m, df_1m]:
+        df['EMA20'] = df['close'].ewm(span=20).mean()
+        df['RSI'] = ta.momentum.RSIIndicator(df['close'], window=14).rsi()
+        bb = ta.volatility.BollingerBands(df['close'], window=20, window_dev=2)
+        df['BB_H'] = bb.bollinger_hband()
+        df['BB_L'] = bb.bollinger_lband()
 
-    # TF Utama - 15M (Trend)
-    df_15m['EMA50'] = ta.trend.ema_indicator(df_15m['close'], window=50)
-    df_15m['EMA200'] = ta.trend.ema_indicator(df_15m['close'], window=200)
-    trend_utama = "Bullish" if df_15m['EMA50'].iloc[-1] > df_15m['EMA200'].iloc[-1] else "Bearish"
+    # Logika utama sinyal
+    signal = None
+    entry = None
+    stop_loss = None
+    take_profit = None
+    current_price = df_1m['close'].iloc[-1]
+    candle_pattern = detect_reversal_candle(df_1m)
 
-    # Konfirmasi - 5M
-    df_5m['RSI'] = ta.momentum.rsi(df_5m['close'], window=14)
-    macd = ta.trend.MACD(df_5m['close'])
-    df_5m['MACD'] = macd.macd()
-    df_5m['MACD_SIGNAL'] = macd.macd_signal()
-    df_5m['ADX'] = ta.trend.adx(df_5m['high'], df_5m['low'], df_5m['close'], window=14)
-    df_5m['VolumeSpike'] = df_5m['volume'] > df_5m['volume'].rolling(window=20).mean() * 1.5
-    last_5m = df_5m.iloc[-1]
-
-    # Entry: 1M - Berdasarkan BB dan RSI
-    df_1m['RSI'] = ta.momentum.rsi(df_1m['close'], window=14)
-    bb = ta.volatility.BollingerBands(df_1m['close'])
-    df_1m['BB_L'] = bb.bollinger_lband()
-    df_1m['BB_H'] = bb.bollinger_hband()
-
-    signal = "NONE"
-    entry = stop_loss = take_profit = None
+    trend_15m = "UP" if df_15m['close'].iloc[-1] > df_15m['EMA20'].iloc[-1] else "DOWN"
+    trend_5m = "UP" if df_5m['close'].iloc[-1] > df_5m['EMA20'].iloc[-1] else "DOWN"
 
     last = df_1m.iloc[-1]
-    current_price = last['close']
 
-    # LONG logic
-    if last['RSI'] < 30 and last['close'] < last['BB_L']:
-        signal = "LONG"
-        entry = current_price
-        # Cari candle terakhir yg close di bawah BB bawah (selain yang terakhir)
-        prev_below_bb = df_1m[:-1][df_1m['close'] < df_1m['BB_L']]
-        stop_loss = prev_below_bb['low'].iloc[-1] if not prev_below_bb.empty else df_1m['low'].min()
-        take_profit = "Sampai muncul sinyal SHORT"
+    if trend_15m == "UP" and trend_5m == "UP":
+        if last['RSI'] < 30 and last['close'] < last['BB_L'] and candle_pattern in ['Hammer', 'InvertedHammer', 'Engulfing']:
+            signal = "LONG"
+            entry = current_price
+            prev_below_bb = df_1m[:-1][df_1m['close'] < df_1m['BB_L']]
+            stop_loss = prev_below_bb['low'].iloc[-1] if not prev_below_bb.empty else df_1m['low'].min()
+            risk = entry - stop_loss
+            take_profit = entry + (2 * risk)
 
-    # SHORT logic
-    elif last['RSI'] > 70 and last['close'] > last['BB_H']:
-        signal = "SHORT"
-        entry = current_price
-        # Cari candle terakhir yg close di atas BB atas (selain yang terakhir)
-        prev_above_bb = df_1m[:-1][df_1m['close'] > df_1m['BB_H']]
-        stop_loss = prev_above_bb['high'].iloc[-1] if not prev_above_bb.empty else df_1m['high'].max()
-        take_profit = "Sampai muncul sinyal LONG"
+    elif trend_15m == "DOWN" and trend_5m == "DOWN":
+        if last['RSI'] > 70 and last['close'] > last['BB_H'] and candle_pattern in ['ShootingStar', 'Engulfing']:
+            signal = "SHORT"
+            entry = current_price
+            prev_above_bb = df_1m[:-1][df_1m['close'] > df_1m['BB_H']]
+            stop_loss = prev_above_bb['high'].iloc[-1] if not prev_above_bb.empty else df_1m['high'].max()
+            risk = stop_loss - entry
+            take_profit = entry - (2 * risk)
 
-    def format_price(p):
-        if p is None:
-            return "-"
-        dec = 8 if 'USDT' in symbol else 4
-        return f"{p:.{dec}f}"
+    result = f"⏰ Time: {datetime.datetime.now().strftime('%H:%M:%S')}\n"
+    result += f"📉 Pair: {symbol}\n"
+    result += f"Trend 15m: {trend_15m}\n"
+    result += f"Trend 5m: {trend_5m}\n"
+    result += f"🕯️ RSI 1m: {last['RSI']:.2f}\n"
+    result += f"📊 Harga Sekarang: {current_price:.2f}\n"
+    result += f"🕯️ Pola Candle Terbaca: `{candle_pattern or 'Tidak ada'}`\n"
 
-    result = f"""
-📊 Pair: {symbol}
-⏰ TF Utama: 15M | Konfirmasi: 5M | Entry: 1M
+    if signal:
+        result += f"\n✅ Sinyal Terdeteksi: {signal}\n"
+        result += f"🎯 Entry: {entry:.2f}\n"
+        result += f"🛑 Stop Loss: {stop_loss:.2f}\n"
+        result += f"🎯 Take Profit: {take_profit:.2f}\n"
+    else:
+        result += "\n🚫 Tidak ada sinyal valid saat ini."
 
-📈 Trend 15M: {trend_utama}
-📌 RSI 5M: {round(last_5m['RSI'], 1)}
-📌 MACD: {'Bullish' if last_5m['MACD'] > last_5m['MACD_SIGNAL'] else 'Bearish'}
-📌 ADX: {round(last_5m['ADX'], 1)}
-📌 Volume Spike: {'Ya' if last_5m['VolumeSpike'] else 'Tidak'}
-
-📄 Sinyal Final: {'✅ ' + signal if signal != 'NONE' else '⛔ Tidak valid'}
-💰 Harga Saat Ini: ${format_price(current_price)}
-"""
-
-    if signal != "NONE":
-        result += f"""
-🎯 Entry: {format_price(entry)}
-🛡️ Stop Loss: {format_price(stop_loss)}
-🎯 Take Profit: {take_profit}
-"""
-
-    return result.strip(), signal, entry
-
+    return result
 @app.route('/webhook', methods=['POST'])
 def webhook():
     data = request.get_json()
