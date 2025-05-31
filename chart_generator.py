@@ -1,43 +1,3 @@
-import matplotlib.pyplot as plt
-import mplfinance as mpf
-import numpy as np
-from io import BytesIO
-from binance.client import Client
-import os
-import pandas as pd
-import ta
-
-# === Inisialisasi Binance Client ===
-BINANCE_API_KEY = os.getenv("BINANCE_API_KEY")
-BINANCE_API_SECRET = os.getenv("BINANCE_API_SECRET")
-client = Client(BINANCE_API_KEY, BINANCE_API_SECRET)
-
-# === Ambil Data Kline dari Binance ===
-def get_klines(symbol: str, interval: str = "1h", limit: int = 250) -> pd.DataFrame:
-    try:
-        raw = client.get_klines(symbol=symbol, interval=interval, limit=limit)
-        if not raw:
-            print("⚠️ Klines kosong.")
-            return None
-
-        df = pd.DataFrame(raw, columns=[
-            'timestamp', 'open', 'high', 'low', 'close', 'volume',
-            'close_time', 'quote_asset_volume', 'number_of_trades',
-            'taker_buy_base', 'taker_buy_quote', 'ignore'
-        ])
-
-        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-        df.set_index('timestamp', inplace=True)
-
-        cols = ['open', 'high', 'low', 'close', 'volume']
-        df[cols] = df[cols].astype(float)
-
-        return df[cols]
-    except Exception as e:
-        print(f"❌ Error get_klines (chart): {e}")
-        return None
-
-# === Fungsi untuk Generate Chart ===
 def generate_chart(symbol: str, signal_type: str = "NONE", entry_price: float = None) -> BytesIO:
     df = get_klines(symbol, interval="1h", limit=250)
     if df is None or df.empty or df.shape[0] < 200:
@@ -53,7 +13,6 @@ def generate_chart(symbol: str, signal_type: str = "NONE", entry_price: float = 
         df['BB_upper'] = bb.bollinger_hband()
         df['BB_lower'] = bb.bollinger_lband()
 
-        # === Plot Tambahan ===
         addplot = [
             mpf.make_addplot(df['EMA50'], color='lime', width=1.2),
             mpf.make_addplot(df['EMA200'], color='orangered', width=1.2),
@@ -61,20 +20,31 @@ def generate_chart(symbol: str, signal_type: str = "NONE", entry_price: float = 
             mpf.make_addplot(df['BB_lower'], color='skyblue', linestyle='--', width=1),
         ]
 
-        # === Marker sinyal dan garis entry ===
-        if signal_type in ["LONG", "SHORT"] and entry_price:
-            marker_symbol = '^' if signal_type == "LONG" else 'v'
-            marker_color = 'green' if signal_type == "LONG" else 'red'
-            marker_value = df['low'].iloc[-1] if signal_type == "LONG" else df['high'].iloc[-1]
-            marker_array = [np.nan] * (len(df) - 1) + [marker_value]
+        # === Tambahkan sinyal dan garis entry jika ada ===
+        if signal_type in ["LONG", "SHORT"] and entry_price is not None:
             df['entry_line'] = entry_price
 
+            # Posisi marker disesuaikan sedikit agar tidak menutupi candle
+            last_index = len(df) - 1
+            marker_array = [np.nan] * last_index
+
+            if signal_type == "LONG":
+                marker_val = df['low'].iloc[-1] * 0.995  # Sedikit di bawah candle
+                marker_color = 'green'
+                marker_symbol = '^'
+            else:  # SHORT
+                marker_val = df['high'].iloc[-1] * 1.005  # Sedikit di atas candle
+                marker_color = 'red'
+                marker_symbol = 'v'
+
+            marker_array.append(marker_val)
+
             addplot += [
-                mpf.make_addplot(marker_array, type='scatter', markersize=150, marker=marker_symbol, color=marker_color),
-                mpf.make_addplot(df['entry_line'], color='gray', linestyle='--', width=1),
+                mpf.make_addplot(marker_array, type='scatter', markersize=120, marker=marker_symbol, color=marker_color),
+                mpf.make_addplot(df['entry_line'], color='gray', linestyle='--', width=1)
             ]
 
-        # === Tambahkan RSI di panel bawah ===
+        # === Tambahkan RSI panel ===
         addplot += [
             mpf.make_addplot(df['RSI'], panel=1, color='blue'),
             mpf.make_addplot([70]*len(df), panel=1, color='red', linestyle='--'),
