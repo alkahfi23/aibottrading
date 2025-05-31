@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np
 import ta
 import telebot
+import talib
 from datetime import datetime
 from binance.client import Client
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
