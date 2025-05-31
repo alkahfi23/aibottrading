@@ -69,23 +69,29 @@ def analyze_multi_timeframe(symbol):
     df_1m['BB_L'] = bb.bollinger_lband()
     df_1m['BB_H'] = bb.bollinger_hband()
 
-    last = df_1m.iloc[-1]
-    prev = df_1m.iloc[-2]
     signal = "NONE"
     entry = stop_loss = take_profit = None
 
-    if last['close'] < last['BB_L'] and last['RSI'] < 30:
-        signal = "LONG"
-        entry = last['close']
-        stop_loss = prev['low']  # SL di BB paling bawah sebelumnya
-        take_profit = "Sampai muncul sinyal SHORT"
-    elif last['close'] > last['BB_H'] and last['RSI'] > 70:
-        signal = "SHORT"
-        entry = last['close']
-        stop_loss = prev['high']  # SL di BB paling atas sebelumnya
-        take_profit = "Sampai muncul sinyal LONG"
-
+    last = df_1m.iloc[-1]
     current_price = last['close']
+
+    # LONG logic
+    if last['RSI'] < 30 and last['close'] < last['BB_L']:
+        signal = "LONG"
+        entry = current_price
+        # Cari candle terakhir yg close di bawah BB bawah (selain yang terakhir)
+        prev_below_bb = df_1m[:-1][df_1m['close'] < df_1m['BB_L']]
+        stop_loss = prev_below_bb['low'].iloc[-1] if not prev_below_bb.empty else df_1m['low'].min()
+        take_profit = "Sampai muncul sinyal SHORT"
+
+    # SHORT logic
+    elif last['RSI'] > 70 and last['close'] > last['BB_H']:
+        signal = "SHORT"
+        entry = current_price
+        # Cari candle terakhir yg close di atas BB atas (selain yang terakhir)
+        prev_above_bb = df_1m[:-1][df_1m['close'] > df_1m['BB_H']]
+        stop_loss = prev_above_bb['high'].iloc[-1] if not prev_above_bb.empty else df_1m['high'].max()
+        take_profit = "Sampai muncul sinyal LONG"
 
     def format_price(p):
         if p is None:
@@ -113,6 +119,7 @@ def analyze_multi_timeframe(symbol):
 🛡️ Stop Loss: {format_price(stop_loss)}
 🎯 Take Profit: {take_profit}
 """
+
     return result.strip(), signal, entry
 
 @app.route('/webhook', methods=['POST'])
