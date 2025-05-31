@@ -2,6 +2,7 @@ import matplotlib.pyplot as plt
 import mplfinance as mpf
 import numpy as np
 from io import BytesIO
+from scipy.signal import argrelextrema
 from binance.client import Client
 import os
 import pandas as pd
@@ -17,7 +18,7 @@ def get_klines(symbol: str, interval: str = "1h", limit: int = 250) -> pd.DataFr
     try:
         raw = client.get_klines(symbol=symbol, interval=interval, limit=limit)
         if not raw:
-            print("⚠️ Klines kosong.")
+            print("⚠️ Data Klines kosong.")
             return None
 
         df = pd.DataFrame(raw, columns=[
@@ -29,14 +30,15 @@ def get_klines(symbol: str, interval: str = "1h", limit: int = 250) -> pd.DataFr
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
         df.set_index('timestamp', inplace=True)
 
-        cols = ['open', 'high', 'low', 'close', 'volume']
-        df[cols] = df[cols].astype(float)
+        float_cols = ['open', 'high', 'low', 'close', 'volume']
+        df[float_cols] = df[float_cols].astype(float)
 
-        return df[cols]
+        return df[float_cols]
     except Exception as e:
-        print(f"❌ Error get_klines (chart): {e}")
+        print(f"❌ Error get_klines: {e}")
         return None
 
+# === Generate Chart Candlestick dengan Indikator ===
 def generate_chart(symbol: str, signal_type: str = "NONE", entry_price: float = None) -> BytesIO:
     df = get_klines(symbol, interval="1h", limit=250)
     if df is None or df.empty or df.shape[0] < 200:
@@ -62,17 +64,15 @@ def generate_chart(symbol: str, signal_type: str = "NONE", entry_price: float = 
         # === Tambahkan sinyal dan garis entry jika ada ===
         if signal_type in ["LONG", "SHORT"] and entry_price is not None:
             df['entry_line'] = entry_price
-
-            # Posisi marker disesuaikan sedikit agar tidak menutupi candle
             last_index = len(df) - 1
             marker_array = [np.nan] * last_index
 
             if signal_type == "LONG":
-                marker_val = df['low'].iloc[-1] * 0.995  # Sedikit di bawah candle
+                marker_val = df['low'].iloc[-1] * 0.995
                 marker_color = 'green'
                 marker_symbol = '^'
-            else:  # SHORT
-                marker_val = df['high'].iloc[-1] * 1.005  # Sedikit di atas candle
+            else:
+                marker_val = df['high'].iloc[-1] * 1.005
                 marker_color = 'red'
                 marker_symbol = 'v'
 
@@ -82,6 +82,25 @@ def generate_chart(symbol: str, signal_type: str = "NONE", entry_price: float = 
                 mpf.make_addplot(marker_array, type='scatter', markersize=120, marker=marker_symbol, color=marker_color),
                 mpf.make_addplot(df['entry_line'], color='gray', linestyle='--', width=1)
             ]
+
+        # === Support & Resistance Otomatis ===
+        # Local minima untuk support, maxima untuk resistance
+        lows = df['low'].values
+        highs = df['high'].values
+        support_idx = argrelextrema(lows, np.less_equal, order=10)[0]
+        resistance_idx = argrelextrema(highs, np.greater_equal, order=10)[0]
+
+        # Ambil 3 level terbaru dari support dan resistance
+        support_lines = sorted(lows[support_idx][-3:])
+        resistance_lines = sorted(highs[resistance_idx][-3:], reverse=True)
+
+        for level in support_lines:
+            df[f'support_{level:.2f}'] = level
+            addplot.append(mpf.make_addplot(df[f'support_{level:.2f}'], color='green', linestyle=':', width=1))
+
+        for level in resistance_lines:
+            df[f'resistance_{level:.2f}'] = level
+            addplot.append(mpf.make_addplot(df[f'resistance_{level:.2f}'], color='red', linestyle=':', width=1))
 
         # === Tambahkan RSI panel ===
         addplot += [
@@ -100,15 +119,13 @@ def generate_chart(symbol: str, signal_type: str = "NONE", entry_price: float = 
             returnfig=True,
             figsize=(10, 8),
             title=f"{symbol} | {signal_type} @ {entry_price}" if signal_type in ["LONG", "SHORT"] else f"{symbol} - Signal Chart",
-            panel_ratios=(3, 1),  # Chart utama : RSI
+            panel_ratios=(3, 1),
         )
 
-        # === Watermark ===
         axlist[0].text(0.02, 0.95, "Signal Future Pro", transform=axlist[0].transAxes,
                        fontsize=14, fontweight='bold', color='navy',
                        bbox=dict(facecolor='white', edgecolor='blue', boxstyle='round,pad=0.5', alpha=0.7))
 
-        # === Simpan ke buffer PNG ===
         buf = BytesIO()
         fig.savefig(buf, format='png')
         plt.close(fig)
