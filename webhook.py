@@ -4,7 +4,6 @@ import pandas as pd
 import numpy as np
 import ta
 import telebot
-import talib
 from datetime import datetime
 from binance.client import Client
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -43,16 +42,34 @@ def get_klines(symbol, interval="5m", limit=100):
         print(f"Error get_klines ({interval}): {e}")
         return None
 
+# Ganti fungsi ini
 def detect_reversal_candle(df):
-    patterns = {
-        'Hammer': talib.CDLHAMMER(df['open'], df['high'], df['low'], df['close']),
-        'InvertedHammer': talib.CDLINVERTEDHAMMER(df['open'], df['high'], df['low'], df['close']),
-        'Engulfing': talib.CDLENGULFING(df['open'], df['high'], df['low'], df['close']),
-        'ShootingStar': talib.CDLSHOOTINGSTAR(df['open'], df['high'], df['low'], df['close']),
-    }
-    for name, pattern in patterns.items():
-        if pattern.iloc[-1] != 0:
-            return name
+    last = df.iloc[-1]
+    prev = df.iloc[-2]
+
+    body = abs(last['close'] - last['open'])
+    upper_shadow = last['high'] - max(last['close'], last['open'])
+    lower_shadow = min(last['close'], last['open']) - last['low']
+    
+    body_ratio = body / (last['high'] - last['low'] + 1e-6)
+
+    # Hammer (bodi kecil di atas dengan sumbu bawah panjang)
+    if body_ratio < 0.3 and lower_shadow > 2 * body and upper_shadow < body:
+        return "Hammer"
+
+    # Inverted Hammer (bodi kecil di bawah dengan sumbu atas panjang)
+    if body_ratio < 0.3 and upper_shadow > 2 * body and lower_shadow < body:
+        return "InvertedHammer"
+
+    # Bullish Engulfing (bodi hijau lebih besar dan menutupi merah sebelumnya)
+    if prev['close'] < prev['open'] and last['close'] > last['open'] and \
+       last['open'] < prev['close'] and last['close'] > prev['open']:
+        return "Engulfing"
+
+    # Shooting Star (bodi kecil di bawah dengan sumbu atas panjang)
+    if body_ratio < 0.3 and upper_shadow > 2 * body and lower_shadow < body:
+        return "ShootingStar"
+
     return None
 
 def analyze_multi_timeframe(symbol):
