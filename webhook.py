@@ -7,7 +7,7 @@ import telebot
 from datetime import datetime
 from binance.client import Client
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-from chart_generator import generate_chart  # Import chart dari file terpisah
+from chart_generator import generate_chart  # Pastikan ini tersedia
 
 app = Flask(__name__)
 
@@ -49,43 +49,43 @@ def analyze_multi_timeframe(symbol):
     if df_15m is None or df_5m is None or df_1m is None:
         return "📉 Data tidak lengkap untuk analisis multi-timeframe.", "NONE", None
 
-    # TF utama: 15M
+    # TF Utama - 15M (Trend)
     df_15m['EMA50'] = ta.trend.ema_indicator(df_15m['close'], window=50)
     df_15m['EMA200'] = ta.trend.ema_indicator(df_15m['close'], window=200)
     trend_utama = "Bullish" if df_15m['EMA50'].iloc[-1] > df_15m['EMA200'].iloc[-1] else "Bearish"
 
-    # Konfirmasi: 5M
+    # Konfirmasi - 5M
     df_5m['RSI'] = ta.momentum.rsi(df_5m['close'], window=14)
     macd = ta.trend.MACD(df_5m['close'])
     df_5m['MACD'] = macd.macd()
     df_5m['MACD_SIGNAL'] = macd.macd_signal()
     df_5m['ADX'] = ta.trend.adx(df_5m['high'], df_5m['low'], df_5m['close'], window=14)
     df_5m['VolumeSpike'] = df_5m['volume'] > df_5m['volume'].rolling(window=20).mean() * 1.5
-
     last_5m = df_5m.iloc[-1]
+
+    # Entry: 1M - Berdasarkan BB dan RSI
+    df_1m['RSI'] = ta.momentum.rsi(df_1m['close'], window=14)
+    bb = ta.volatility.BollingerBands(df_1m['close'])
+    df_1m['BB_L'] = bb.bollinger_lband()
+    df_1m['BB_H'] = bb.bollinger_hband()
+
+    last = df_1m.iloc[-1]
+    prev = df_1m.iloc[-2]
     signal = "NONE"
-
-    if trend_utama == "Bullish" and last_5m['MACD'] > last_5m['MACD_SIGNAL'] and last_5m['RSI'] > 50:
-        signal = "LONG"
-    elif trend_utama == "Bearish" and last_5m['MACD'] < last_5m['MACD_SIGNAL'] and last_5m['RSI'] < 50:
-        signal = "SHORT"
-
-    # Entry: 1M
-    bb_1m = ta.volatility.BollingerBands(df_1m['close'])
-    df_1m['BB_L'] = bb_1m.bollinger_lband()
-    df_1m['BB_H'] = bb_1m.bollinger_hband()
-
     entry = stop_loss = take_profit = None
-    if signal == "LONG":
-        entry = df_1m['BB_L'].iloc[-1]
-        stop_loss = entry * 0.985
-        take_profit = entry + (entry - stop_loss) * 1.5
-    elif signal == "SHORT":
-        entry = df_1m['BB_H'].iloc[-1]
-        stop_loss = entry * 1.015
-        take_profit = entry - (stop_loss - entry) * 1.5
 
-    current_price = df_1m['close'].iloc[-1]
+    if last['close'] < last['BB_L'] and last['RSI'] < 30:
+        signal = "LONG"
+        entry = last['close']
+        stop_loss = prev['low']  # SL di BB paling bawah sebelumnya
+        take_profit = "Sampai muncul sinyal SHORT"
+    elif last['close'] > last['BB_H'] and last['RSI'] > 70:
+        signal = "SHORT"
+        entry = last['close']
+        stop_loss = prev['high']  # SL di BB paling atas sebelumnya
+        take_profit = "Sampai muncul sinyal LONG"
+
+    current_price = last['close']
 
     def format_price(p):
         if p is None:
@@ -98,9 +98,9 @@ def analyze_multi_timeframe(symbol):
 ⏰ TF Utama: 15M | Konfirmasi: 5M | Entry: 1M
 
 📈 Trend 15M: {trend_utama}
-📌 RSI 5M: {round(last_5m['RSI'],1)}
+📌 RSI 5M: {round(last_5m['RSI'], 1)}
 📌 MACD: {'Bullish' if last_5m['MACD'] > last_5m['MACD_SIGNAL'] else 'Bearish'}
-📌 ADX: {round(last_5m['ADX'],1)}
+📌 ADX: {round(last_5m['ADX'], 1)}
 📌 Volume Spike: {'Ya' if last_5m['VolumeSpike'] else 'Tidak'}
 
 📄 Sinyal Final: {'✅ ' + signal if signal != 'NONE' else '⛔ Tidak valid'}
@@ -109,9 +109,9 @@ def analyze_multi_timeframe(symbol):
 
     if signal != "NONE":
         result += f"""
-🎯 Entry (BB 1M): {format_price(entry)}
+🎯 Entry: {format_price(entry)}
 🛡️ Stop Loss: {format_price(stop_loss)}
-🎯 Take Profit: {format_price(take_profit)}
+🎯 Take Profit: {take_profit}
 """
     return result.strip(), signal, entry
 
@@ -130,7 +130,7 @@ def webhook():
                     message, signal, entry = analyze_multi_timeframe(symbol)
                     if signal == text:
                         TELEGRAM_BOT.send_message(chat_id, message, parse_mode="Markdown")
-                        chart = generate_chart(symbol, signal, entry_price)
+                        chart = generate_chart(symbol, signal, entry)
                         if chart:
                             TELEGRAM_BOT.send_photo(chat_id=chat_id, photo=chart)
                         markup = InlineKeyboardMarkup()
