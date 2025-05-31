@@ -44,34 +44,47 @@ def get_klines(symbol, interval="5m", limit=100):
 
 # Ganti fungsi ini
 def detect_reversal_candle(df):
-    last = df.iloc[-1]
-    prev = df.iloc[-2]
+    if len(df) < 3:
+        return None
 
-    body = abs(last['close'] - last['open'])
-    upper_shadow = last['high'] - max(last['close'], last['open'])
-    lower_shadow = min(last['close'], last['open']) - last['low']
-    
-    body_ratio = body / (last['high'] - last['low'] + 1e-6)
+    c1 = df.iloc[-3]  # Candle pertama (pola)
+    c2 = df.iloc[-2]  # Candle kedua
+    c3 = df.iloc[-1]  # Candle ketiga (konfirmasi)
 
-    # Hammer (bodi kecil di atas dengan sumbu bawah panjang)
-    if body_ratio < 0.3 and lower_shadow > 2 * body and upper_shadow < body:
-        return "Hammer"
+    def body(c): return abs(c['close'] - c['open'])
+    def upper(c): return c['high'] - max(c['close'], c['open'])
+    def lower(c): return min(c['close'], c['open']) - c['low']
+    def is_bullish(c): return c['close'] > c['open']
+    def is_bearish(c): return c['close'] < c['open']
+    def body_ratio(c): return body(c) / (c['high'] - c['low'] + 1e-6)
 
-    # Inverted Hammer (bodi kecil di bawah dengan sumbu atas panjang)
-    if body_ratio < 0.3 and upper_shadow > 2 * body and lower_shadow < body:
-        return "InvertedHammer"
+    # --- HAMMER ---
+    if body_ratio(c2) < 0.3 and lower(c2) > 2 * body(c2) and upper(c2) < body(c2):
+        if is_bullish(c3):  # konfirmasi naik
+            return "Hammer"
 
-    # Bullish Engulfing (bodi hijau lebih besar dan menutupi merah sebelumnya)
-    if prev['close'] < prev['open'] and last['close'] > last['open'] and \
-       last['open'] < prev['close'] and last['close'] > prev['open']:
-        return "Engulfing"
+    # --- INVERTED HAMMER ---
+    if body_ratio(c2) < 0.3 and upper(c2) > 2 * body(c2) and lower(c2) < body(c2):
+        if is_bullish(c3):
+            return "InvertedHammer"
 
-    # Shooting Star (bodi kecil di bawah dengan sumbu atas panjang)
-    if body_ratio < 0.3 and upper_shadow > 2 * body and lower_shadow < body:
-        return "ShootingStar"
+    # --- BULLISH ENGULFING ---
+    if is_bearish(c1) and is_bullish(c2) and c2['open'] < c1['close'] and c2['close'] > c1['open']:
+        if is_bullish(c3):
+            return "Engulfing"
+
+    # --- SHOOTING STAR ---
+    if body_ratio(c2) < 0.3 and upper(c2) > 2 * body(c2) and lower(c2) < body(c2):
+        if is_bearish(c3):
+            return "ShootingStar"
+
+    # --- BEARISH ENGULFING ---
+    if is_bullish(c1) and is_bearish(c2) and c2['open'] > c1['close'] and c2['close'] < c1['open']:
+        if is_bearish(c3):
+            return "Engulfing"
 
     return None
-
+    
 def analyze_multi_timeframe(symbol):
     df_15m = get_klines(symbol, '15m', 500)
     df_5m = get_klines(symbol, '5m', 500)
