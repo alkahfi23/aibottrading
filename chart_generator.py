@@ -6,6 +6,18 @@ import ta  # Technical Analysis library
 from io import BytesIO
 
 
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TELEGRAM_BOT = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
+BINANCE_API_KEY = os.getenv("BINANCE_API_KEY")
+BINANCE_API_SECRET = os.getenv("BINANCE_API_SECRET")
+
+client = Client(BINANCE_API_KEY, BINANCE_API_SECRET)
+
+POPULAR_SYMBOLS = [
+    "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT",
+    "ADAUSDT", "AVAXUSDT", "DOGEUSDT", "DOTUSDT", "MATICUSDT"
+]
+
 def get_klines(symbol, interval="5m", limit=100):
     try:
         raw = client.get_klines(symbol=symbol, interval=interval, limit=limit)
