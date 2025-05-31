@@ -234,39 +234,65 @@ def webhook():
         text = data["message"]["text"].strip().upper()
         chat_id = data["message"]["chat"]["id"]
 
-        if text == "/BACKTEST":
-            TELEGRAM_BOT.send_message(chat_id, "🧪 Memulai backtest semua simbol...")
-            summary = backtest_all_symbols(POPULAR_SYMBOLS, interval="1m", limit=500)
-            formatted = format_summary(summary)
-            TELEGRAM_BOT.send_message(chat_id, formatted, parse_mode="Markdown")
+        if text == "/HELP":
+            help_text = (
+                "🤖 *Panduan Bot Signal Trading:*\n\n"
+                "🔍 Kirim salah satu perintah berikut:\n"
+                "`/BACKTEST` — Jalankan backtest semua pair populer\n"
+                "`LONG` — Cari sinyal BUY (naik)\n"
+                "`SHORT` — Cari sinyal SELL (turun)\n"
+                "`BTCUSDT`, `ETHUSDT`, dst — Analisa spesifik pair\n"
+                "`/HELP` — Tampilkan bantuan ini\n\n"
+                "💡 Tips: Gunakan di saat volatilitas tinggi untuk sinyal terbaik."
+            )
+
+            # Inline button
+            markup = InlineKeyboardMarkup()
+            markup.add(
+                InlineKeyboardButton("🔁 Backtest", callback_data="BACKTEST"),
+                InlineKeyboardButton("✅ Cari LONG", callback_data="LONG"),
+                InlineKeyboardButton("⛔ Cari SHORT", callback_data="SHORT")
+            )
+            TELEGRAM_BOT.send_message(chat_id, help_text, parse_mode="Markdown", reply_markup=markup)
             return "OK"
 
-        if text in ["LONG", "SHORT"]:
-            found = False
-            TELEGRAM_BOT.send_message(chat_id, f"🔍 Mencari sinyal `{text}` di 10 coin populer...", parse_mode="Markdown")
-            for symbol in POPULAR_SYMBOLS:
-                try:
-                    message, signal, entry = analyze_multi_timeframe(symbol)
-                    if signal == text:
-                        TELEGRAM_BOT.send_message(chat_id, message, parse_mode="Markdown")
-                        chart = generate_chart(symbol, signal, entry)
-                        if chart:
-                            TELEGRAM_BOT.send_photo(chat_id=chat_id, photo=chart)
-                        markup = InlineKeyboardMarkup()
-                        button = InlineKeyboardButton(
-                            text=f"Buka {symbol} di Binance 📲",
-                            url=f"https://www.binance.com/en/futures/{symbol}?ref=GRO_16987_24H8Y"
-                        )
-                        markup.add(button)
-                        TELEGRAM_BOT.send_message(chat_id, "Klik tombol di bawah untuk buka di aplikasi Binance:", reply_markup=markup)
-                        found = True
-                except Exception as e:
-                    print(f"Error cek {symbol}: {e}")
+        # Menangani tombol inline
+        if "callback_query" in data:
+            callback_data = data["callback_query"]["data"]
+            chat_id = data["callback_query"]["message"]["chat"]["id"]
 
-            if not found:
-                TELEGRAM_BOT.send_message(chat_id, f"❌ Tidak ditemukan sinyal `{text}` saat ini.", parse_mode="Markdown")
-            return "OK"
+            if callback_data == "BACKTEST":
+                TELEGRAM_BOT.send_message(chat_id, "🧪 Memulai backtest semua simbol...")
+                summary = backtest_all_symbols(POPULAR_SYMBOLS, interval="1m", limit=500)
+                formatted = format_summary(summary)
+                TELEGRAM_BOT.send_message(chat_id, formatted, parse_mode="Markdown")
+                return "OK"
 
+            if callback_data in ["LONG", "SHORT"]:
+                found = False
+                TELEGRAM_BOT.send_message(chat_id, f"🔍 Mencari sinyal `{callback_data}` di 10 coin populer...", parse_mode="Markdown")
+                for symbol in POPULAR_SYMBOLS:
+                    try:
+                        message, signal, entry = analyze_multi_timeframe(symbol)
+                        if signal == callback_data:
+                            TELEGRAM_BOT.send_message(chat_id, message, parse_mode="Markdown")
+                            chart = generate_chart(symbol, signal, entry)
+                            if chart:
+                                TELEGRAM_BOT.send_photo(chat_id=chat_id, photo=chart)
+                            markup = InlineKeyboardMarkup()
+                            button = InlineKeyboardButton(
+                                text=f"Buka {symbol} di Binance 📲",
+                                url=f"https://www.binance.com/en/futures/{symbol}?ref=GRO_16987_24H8Y"
+                            )
+                            markup.add(button)
+                            TELEGRAM_BOT.send_message(chat_id, "Klik tombol di bawah untuk buka di aplikasi Binance:", reply_markup=markup)
+                            found = True
+                    except Exception as e:
+                        print(f"Error cek {symbol}: {e}")
+
+                if not found:
+                    TELEGRAM_BOT.send_message(chat_id, f"❌ Tidak ditemukan sinyal `{callback_data}` saat ini.", parse_mode="Markdown")
+                return "OK"
         # Cek simbol langsung seperti BTCUSDT
         if len(text) >= 6 and text.isalnum():
             try:
