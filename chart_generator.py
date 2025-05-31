@@ -1,3 +1,29 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import mplfinance as mpf
+import ta  # Technical Analysis library
+from io import BytesIO
+
+
+def get_klines(symbol, interval="5m", limit=100):
+    try:
+        raw = client.get_klines(symbol=symbol, interval=interval, limit=limit)
+        if not raw:
+            return None
+        df = pd.DataFrame(raw, columns=[
+            'timestamp', 'open', 'high', 'low', 'close', 'volume',
+            'close_time', 'quote_asset_volume', 'number_of_trades',
+            'taker_buy_base', 'taker_buy_quote', 'ignore'
+        ])
+        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+        df.set_index('timestamp', inplace=True)
+        df = df.astype(float)
+        return df[['open', 'high', 'low', 'close', 'volume']]
+    except Exception as e:
+        print(f"Error get_klines ({interval}): {e}")
+        return None
+
 def generate_chart(symbol: str, signal_type: str = "NONE", entry_price: float = None) -> BytesIO:
     df = get_klines(symbol, interval="1h", limit=250)
     if df is None or df.empty or df.shape[0] < 200:
