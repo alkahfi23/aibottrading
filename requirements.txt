@@ -6,4 +6,6 @@ python-telegram-bot
 python-binance
 ta
 pyTelegramBotAPI
+TA-Lib
+
 
