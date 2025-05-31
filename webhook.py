@@ -27,20 +27,30 @@ POPULAR_SYMBOLS = [
 def get_klines(symbol, interval="5m", limit=100):
     try:
         raw = client.get_klines(symbol=symbol, interval=interval, limit=limit)
-        if not raw:
+        if not raw or len(raw) < limit // 2:
+            print(f"⚠️ Data kline {symbol}-{interval} tidak mencukupi. Dapat: {len(raw)}")
             return None
+
         df = pd.DataFrame(raw, columns=[
             'timestamp', 'open', 'high', 'low', 'close', 'volume',
             'close_time', 'quote_asset_volume', 'number_of_trades',
             'taker_buy_base', 'taker_buy_quote', 'ignore'
         ])
+
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
         df.set_index('timestamp', inplace=True)
-        df = df.astype(float)
+
+        # Ubah kolom angka jadi float, dengan error handling
+        for col in ['open', 'high', 'low', 'close', 'volume']:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+
+        df.dropna(inplace=True)
+
         return df[['open', 'high', 'low', 'close', 'volume']]
     except Exception as e:
-        print(f"Error get_klines ({interval}): {e}")
+        print(f"❌ ERROR get_klines({symbol}, {interval}): {e}")
         return None
+
 
 # Ganti fungsi ini
 def detect_reversal_candle(df):
@@ -166,20 +176,31 @@ def format_summary(summary):
 
     
 def analyze_multi_timeframe(symbol):
+    # Ambil data per timeframe
     df_15m = get_klines(symbol, '15m', 500)
     df_5m = get_klines(symbol, '5m', 500)
     df_1m = get_klines(symbol, '1m', 500)
 
+    # Cek error pengambilan data
     if df_1m is None or df_5m is None or df_15m is None:
-        raise ValueError("Gagal mengambil data untuk salah satu timeframe.")
+        print(f"⚠️ Gagal ambil data untuk {symbol}. Timeframe yang error:")
+        if df_15m is None: print("- 15m")
+        if df_5m is None: print("- 5m")
+        if df_1m is None: print("- 1m")
+        return f"❌ Gagal ambil data {symbol}", "ERROR", 0
 
-    for df in [df_15m, df_5m, df_1m]:
-        df['EMA20'] = df['close'].ewm(span=20).mean()
-        df['RSI'] = ta.momentum.RSIIndicator(df['close'], window=14).rsi()
-        bb = ta.volatility.BollingerBands(df['close'], window=20, window_dev=2)
-        df['BB_H'] = bb.bollinger_hband()
-        df['BB_L'] = bb.bollinger_lband()
+    try:
+        for df in [df_15m, df_5m, df_1m]:
+            df['EMA20'] = df['close'].ewm(span=20).mean()
+            df['RSI'] = ta.momentum.RSIIndicator(df['close'], window=14).rsi()
+            bb = ta.volatility.BollingerBands(df['close'], window=20, window_dev=2)
+            df['BB_H'] = bb.bollinger_hband()
+            df['BB_L'] = bb.bollinger_lband()
+    except Exception as e:
+        print(f"❌ Error hitung indikator: {e}")
+        return f"❌ Error indikator {symbol}: {e}", "ERROR", 0
 
+    # Analisis sinyal
     signal = None
     entry = None
     stop_loss = None
@@ -209,6 +230,7 @@ def analyze_multi_timeframe(symbol):
             risk = stop_loss - entry
             take_profit = entry - (2 * risk)
 
+    # Format hasil
     result = f"⏰ Time: {datetime.now().strftime('%H:%M:%S')}\n"
     result += f"📉 Pair: {symbol}\n"
     result += f"Trend 15m: {trend_15m}\n"
@@ -226,6 +248,7 @@ def analyze_multi_timeframe(symbol):
         result += "\n🚫 Tidak ada sinyal valid saat ini."
 
     return result, signal or "NONE", entry or 0
+
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
