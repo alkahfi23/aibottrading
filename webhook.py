@@ -282,11 +282,11 @@ def webhook():
                 "`/BACKTEST` — Jalankan backtest semua pair populer\n"
                 "`LONG` — Cari sinyal BUY (naik)\n"
                 "`SHORT` — Cari sinyal SELL (turun)\n"
+                "`CHART BTCUSDT` — Lihat chart + sinyal untuk pair tertentu\n"
                 "`BTCUSDT`, `ETHUSDT`, dst — Analisa spesifik pair\n"
                 "`/HELP` — Tampilkan bantuan ini\n\n"
                 "💡 Tips: Gunakan di saat volatilitas tinggi untuk sinyal terbaik."
             )
-
             markup = InlineKeyboardMarkup()
             markup.add(
                 InlineKeyboardButton("🔁 Backtest", callback_data="BACKTEST"),
@@ -295,6 +295,31 @@ def webhook():
             )
             TELEGRAM_BOT.send_message(chat_id, help_text, parse_mode="Markdown", reply_markup=markup)
             return "OK"
+        
+        # Cek perintah CHART SYMBOL
+        if text.startswith("CHART "):
+            parts = text.split()
+            if len(parts) == 2:
+                symbol = parts[1].upper()
+                try:
+                    message, signal, entry = analyze_multi_timeframe(symbol)
+                    TELEGRAM_BOT.send_message(chat_id, message, parse_mode="Markdown")
+
+                    chart = generate_chart(symbol, signal, entry)
+                    if chart:
+                        TELEGRAM_BOT.send_photo(chat_id=chat_id, photo=chart)
+
+                    markup = InlineKeyboardMarkup()
+                    button = InlineKeyboardButton(
+                        text=f"Buka {symbol} di Binance 📲",
+                        url=f"https://www.binance.com/en/futures/{symbol}?ref=GRO_16987_24H8Y"
+                    )
+                    markup.add(button)
+                    TELEGRAM_BOT.send_message(chat_id, "Klik tombol di bawah untuk buka di aplikasi Binance:", reply_markup=markup)
+                except Exception as e:
+                    TELEGRAM_BOT.send_message(chat_id, f"⚠️ Gagal mengambil chart: {e}")
+            else:
+                TELEGRAM_BOT.send_message(chat_id, "⚠️ Format tidak valid. Contoh: `CHART BTCUSDT`", parse_mode="Markdown")
 
         # Cek simbol langsung
         if len(text) >= 6 and text.isalnum():
