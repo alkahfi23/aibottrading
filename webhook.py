@@ -8,10 +8,11 @@ import talib
 from datetime import datetime
 from binance.client import Client
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-from chart_generator import generate_chart  # Pastikan ini tersedia
+from chart_generator import generate_chart  # Pastikan file ini tersedia dan berfungsi
 
 app = Flask(__name__)
 
+# Load environment variables
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_BOT = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 BINANCE_API_KEY = os.getenv("BINANCE_API_KEY")
@@ -43,16 +44,14 @@ def get_klines(symbol, interval="5m", limit=100):
         return None
 
 def detect_reversal_candle(df):
-    """Deteksi pola candlestick pembalikan pada candle terakhir."""
     patterns = {
         'Hammer': talib.CDLHAMMER(df['open'], df['high'], df['low'], df['close']),
         'InvertedHammer': talib.CDLINVERTEDHAMMER(df['open'], df['high'], df['low'], df['close']),
         'Engulfing': talib.CDLENGULFING(df['open'], df['high'], df['low'], df['close']),
         'ShootingStar': talib.CDLSHOOTINGSTAR(df['open'], df['high'], df['low'], df['close']),
     }
-    last_idx = -1
     for name, pattern in patterns.items():
-        if pattern.iloc[last_idx] != 0:
+        if pattern.iloc[-1] != 0:
             return name
     return None
 
@@ -61,7 +60,9 @@ def analyze_multi_timeframe(symbol):
     df_5m = get_klines(symbol, '5m', 500)
     df_1m = get_klines(symbol, '1m', 500)
 
-    # Tambahkan indikator ke semua timeframe
+    if df_1m is None or df_5m is None or df_15m is None:
+        raise ValueError("Gagal mengambil data untuk salah satu timeframe.")
+
     for df in [df_15m, df_5m, df_1m]:
         df['EMA20'] = df['close'].ewm(span=20).mean()
         df['RSI'] = ta.momentum.RSIIndicator(df['close'], window=14).rsi()
@@ -69,7 +70,6 @@ def analyze_multi_timeframe(symbol):
         df['BB_H'] = bb.bollinger_hband()
         df['BB_L'] = bb.bollinger_lband()
 
-    # Logika utama sinyal
     signal = None
     entry = None
     stop_loss = None
@@ -79,7 +79,6 @@ def analyze_multi_timeframe(symbol):
 
     trend_15m = "UP" if df_15m['close'].iloc[-1] > df_15m['EMA20'].iloc[-1] else "DOWN"
     trend_5m = "UP" if df_5m['close'].iloc[-1] > df_5m['EMA20'].iloc[-1] else "DOWN"
-
     last = df_1m.iloc[-1]
 
     if trend_15m == "UP" and trend_5m == "UP":
@@ -100,7 +99,7 @@ def analyze_multi_timeframe(symbol):
             risk = stop_loss - entry
             take_profit = entry - (2 * risk)
 
-    result = f"⏰ Time: {datetime.datetime.now().strftime('%H:%M:%S')}\n"
+    result = f"⏰ Time: {datetime.now().strftime('%H:%M:%S')}\n"
     result += f"📉 Pair: {symbol}\n"
     result += f"Trend 15m: {trend_15m}\n"
     result += f"Trend 5m: {trend_5m}\n"
@@ -116,7 +115,8 @@ def analyze_multi_timeframe(symbol):
     else:
         result += "\n🚫 Tidak ada sinyal valid saat ini."
 
-    return result
+    return result, signal or "NONE", entry or 0
+
 @app.route('/webhook', methods=['POST'])
 def webhook():
     data = request.get_json()
@@ -150,6 +150,7 @@ def webhook():
                 TELEGRAM_BOT.send_message(chat_id, f"❌ Tidak ditemukan sinyal `{text}` saat ini.", parse_mode="Markdown")
             return "OK"
 
+        # Cek simbol langsung seperti BTCUSDT
         if len(text) >= 6 and text.isalnum():
             try:
                 message, signal, entry = analyze_multi_timeframe(text)
@@ -168,9 +169,9 @@ def webhook():
                     markup.add(button)
                     TELEGRAM_BOT.send_message(chat_id, "Klik tombol di bawah untuk buka di aplikasi Binance:", reply_markup=markup)
             except Exception as e:
-                TELEGRAM_BOT.send_message(chat_id, f"Error analisis: {e}")
+                TELEGRAM_BOT.send_message(chat_id, f"⚠️ Error analisis: {e}")
         else:
-            TELEGRAM_BOT.send_message(chat_id, "Format simbol tidak valid atau terlalu pendek.")
+            TELEGRAM_BOT.send_message(chat_id, "⚠️ Format simbol tidak valid atau terlalu pendek.")
     return "OK"
 
 if __name__ == '__main__':
