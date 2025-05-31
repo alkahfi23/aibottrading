@@ -1,41 +1,40 @@
-import pandas as pd
-import numpy as np
 import matplotlib.pyplot as plt
 import mplfinance as mpf
-import ta
-import os# Technical Analysis library
+import numpy as np
 from io import BytesIO
+from binance.client import Client
+import os
+import pandas as pd
+import ta
 
-
-
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-TELEGRAM_BOT = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
+# === Inisialisasi Binance Client ===
 BINANCE_API_KEY = os.getenv("BINANCE_API_KEY")
 BINANCE_API_SECRET = os.getenv("BINANCE_API_SECRET")
-
 client = Client(BINANCE_API_KEY, BINANCE_API_SECRET)
 
-POPULAR_SYMBOLS = [
-    "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT",
-    "ADAUSDT", "AVAXUSDT", "DOGEUSDT", "DOTUSDT", "MATICUSDT"
-]
-
-def get_klines(symbol, interval="5m", limit=100):
+# === Ambil Data Kline dari Binance ===
+def get_klines(symbol: str, interval: str = "1h", limit: int = 250) -> pd.DataFrame:
     try:
         raw = client.get_klines(symbol=symbol, interval=interval, limit=limit)
         if not raw:
+            print("⚠️ Klines kosong.")
             return None
+
         df = pd.DataFrame(raw, columns=[
             'timestamp', 'open', 'high', 'low', 'close', 'volume',
             'close_time', 'quote_asset_volume', 'number_of_trades',
             'taker_buy_base', 'taker_buy_quote', 'ignore'
         ])
+
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
         df.set_index('timestamp', inplace=True)
-        df = df.astype(float)
-        return df[['open', 'high', 'low', 'close', 'volume']]
+
+        cols = ['open', 'high', 'low', 'close', 'volume']
+        df[cols] = df[cols].astype(float)
+
+        return df[cols]
     except Exception as e:
-        print(f"Error get_klines ({interval}): {e}")
+        print(f"❌ Error get_klines (chart): {e}")
         return None
 
 def generate_chart(symbol: str, signal_type: str = "NONE", entry_price: float = None) -> BytesIO:
