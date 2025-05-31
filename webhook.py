@@ -84,6 +84,86 @@ def detect_reversal_candle(df):
             return "Engulfing"
 
     return None
+
+def backtest_strategy(symbol, interval="1m", limit=500):
+    df = get_klines(symbol, interval, limit)
+    if df is None or df.shape[0] < 100:
+        return []
+
+    df['EMA20'] = df['close'].ewm(span=20).mean()
+    df['RSI'] = ta.momentum.RSIIndicator(df['close'], window=14).rsi()
+    bb = ta.volatility.BollingerBands(df['close'], window=20, window_dev=2)
+    df['BB_H'] = bb.bollinger_hband()
+    df['BB_L'] = bb.bollinger_lband()
+
+    results = []
+    for i in range(30, len(df) - 10):
+        candle = df.iloc[i]
+        trend = "UP" if df.iloc[i-5:i]['close'].mean() > df.iloc[i-5:i]['EMA20'].mean() else "DOWN"
+        candle_pattern = detect_reversal_candle(df.iloc[i-2:i+1])
+
+        entry = candle['close']
+        result = None
+        take_profit = None
+        stop_loss = None
+        RR = None
+
+        if trend == "UP" and candle['RSI'] < 30 and candle['close'] < candle['BB_L'] and candle_pattern in ['Hammer', 'InvertedHammer', 'Engulfing']:
+            stop_loss = df.iloc[i]['low']
+            take_profit = entry + (entry - stop_loss) * 2
+            future = df.iloc[i+1:i+6]
+            if (future['high'] >= take_profit).any():
+                result = "WIN"
+            elif (future['low'] <= stop_loss).any():
+                result = "LOSS"
+
+        elif trend == "DOWN" and candle['RSI'] > 70 and candle['close'] > candle['BB_H'] and candle_pattern in ['ShootingStar', 'Engulfing']:
+            stop_loss = df.iloc[i]['high']
+            take_profit = entry - (stop_loss - entry) * 2
+            future = df.iloc[i+1:i+6]
+            if (future['low'] <= take_profit).any():
+                result = "WIN"
+            elif (future['high'] >= stop_loss).any():
+                result = "LOSS"
+
+        if result:
+            RR = 2.0
+            results.append({"index": i, "result": result, "RR": RR})
+
+    return results
+
+def backtest_all_symbols(symbols, interval="1m", limit=500):
+    summary = []
+    for symbol in symbols:
+        results = backtest_strategy(symbol, interval, limit)
+        if not results:
+            continue
+        total = len(results)
+        wins = sum(1 for r in results if r["result"] == "WIN")
+        losses = sum(1 for r in results if r["result"] == "LOSS")
+        rr_list = [r["RR"] for r in results if r["RR"] is not None]
+        accuracy = (wins / total) * 100 if total > 0 else 0
+        avg_rr = np.mean(rr_list) if rr_list else 0
+        profit_factor = (wins * 2) / (losses * 1) if losses > 0 else float("inf")
+        summary.append({
+            "symbol": symbol,
+            "total_trades": total,
+            "wins": wins,
+            "losses": losses,
+            "accuracy": round(accuracy, 2),
+            "avg_rr": round(avg_rr, 2),
+            "profit_factor": round(profit_factor, 2) if isinstance(profit_factor, float) else "∞"
+        })
+    return summary
+
+def format_summary(summary):
+    lines = ["📊 *Rangkuman Backtest Semua Pair:*\n"]
+    lines.append("Pair | Trade | Win | Loss | Akurasi | R:R | Profit")
+    lines.append("-" * 45)
+    for s in summary:
+        lines.append(f"{s['symbol']} | {s['total_trades']} | {s['wins']} | {s['losses']} | {s['accuracy']}% | {s['avg_rr']} | {s['profit_factor']}")
+    return "\n".join(lines)
+
     
 def analyze_multi_timeframe(symbol):
     df_15m = get_klines(symbol, '15m', 500)
@@ -153,6 +233,13 @@ def webhook():
     if "message" in data and "text" in data["message"]:
         text = data["message"]["text"].strip().upper()
         chat_id = data["message"]["chat"]["id"]
+
+        if text == "/BACKTEST":
+            TELEGRAM_BOT.send_message(chat_id, "🧪 Memulai backtest semua simbol...")
+            summary = backtest_all_symbols(POPULAR_SYMBOLS, interval="1m", limit=500)
+            formatted = format_summary(summary)
+            TELEGRAM_BOT.send_message(chat_id, formatted, parse_mode="Markdown")
+            return "OK"
 
         if text in ["LONG", "SHORT"]:
             found = False
