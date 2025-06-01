@@ -351,7 +351,7 @@ def webhook():
                 TELEGRAM_BOT.send_message(chat_id, message, parse_mode="Markdown")
 
                 if signal != "NONE":
-                    chart = generate_chart(text, signal, entry)
+                    chart = generate_and_send_chart(text, signal, entry)
                     if chart:
                         TELEGRAM_BOT.send_photo(chat_id, chart)
 
