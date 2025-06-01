@@ -249,8 +249,7 @@ def analyze_multi_timeframe(symbol):
 
     return result, signal or "NONE", entry or 0
 
-
-@app.route('/webhook', methods=['POST'])
+@app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.get_json()
 
@@ -274,7 +273,7 @@ def webhook():
                     message, signal, entry = analyze_multi_timeframe(symbol)
                     if signal == callback_data:
                         TELEGRAM_BOT.send_message(chat_id, message, parse_mode="Markdown")
-                        chart = send_all_timeframes(symbol)
+                        chart = draw_chart_by_timeframe(symbol, "1m")
                         if chart:
                             TELEGRAM_BOT.send_photo(chat_id=chat_id, photo=chart)
 
@@ -291,7 +290,27 @@ def webhook():
 
             if not found:
                 TELEGRAM_BOT.send_message(chat_id, f"❌ Tidak ditemukan sinyal `{callback_data}` saat ini.", parse_mode="Markdown")
-        return "OK"
+            return "OK"
+
+        # === Handle callback untuk tombol pilihan timeframe chart ===
+        # Format callback_data = "CHART_SYMBOL_TIMEFRAME"
+        if callback_data.startswith("CHART_"):
+            try:
+                _, symbol, timeframe = callback_data.split("_")
+                chart = draw_chart_by_timeframe(symbol, timeframe)
+                caption = f"📊 {symbol} - {timeframe.upper()} Chart"
+                TELEGRAM_BOT.send_photo(chat_id=chat_id, photo=chart, caption=caption)
+
+                markup = InlineKeyboardMarkup()
+                btn_binance = InlineKeyboardButton(
+                    text=f"Buka {symbol} di Binance 📲",
+                    url=f"https://www.binance.com/en/futures/{symbol}?ref=GRO_16987_24H8Y"
+                )
+                markup.add(btn_binance)
+                TELEGRAM_BOT.send_message(chat_id, "Klik tombol di bawah untuk buka di aplikasi Binance:", reply_markup=markup)
+            except Exception as e:
+                TELEGRAM_BOT.send_message(chat_id, f"⚠️ Gagal generate chart: {e}")
+            return "OK"
 
     # === Handle regular messages ===
     if "message" in data and "text" in data["message"]:
@@ -310,39 +329,41 @@ def webhook():
                 "`/HELP` — Tampilkan bantuan ini\n\n"
                 "💡 Tips: Gunakan di saat volatilitas tinggi untuk sinyal terbaik."
             )
-            markup = InlineKeyboardMarkup()
-            markup.add(
-                InlineKeyboardButton("🔁 Backtest", callback_data="BACKTEST"),
-                InlineKeyboardButton("✅ Cari LONG", callback_data="LONG"),
-                InlineKeyboardButton("⛔ Cari SHORT", callback_data="SHORT")
-            )
+            markup = InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("🔁 Backtest", callback_data="BACKTEST"),
+                    InlineKeyboardButton("✅ Cari LONG", callback_data="LONG"),
+                    InlineKeyboardButton("⛔ Cari SHORT", callback_data="SHORT")
+                ]
+            ])
             TELEGRAM_BOT.send_message(chat_id, help_text, parse_mode="Markdown", reply_markup=markup)
             return "OK"
-        
+
         # Cek perintah CHART SYMBOL
         if text.startswith("CHART "):
             parts = text.split()
             if len(parts) == 2:
-                symbol = parts[1].upper()
+                symbol = parts[1]
                 try:
                     message, signal, entry = analyze_multi_timeframe(symbol)
                     TELEGRAM_BOT.send_message(chat_id, message, parse_mode="Markdown")
 
-                    chart = send_all_timeframes(symbol)
-                    if chart:
-                        TELEGRAM_BOT.send_photo(chat_id=chat_id, photo=chart)
-
-                    markup = InlineKeyboardMarkup()
-                    button = InlineKeyboardButton(
-                        text=f"Buka {symbol} di Binance 📲",
-                        url=f"https://www.binance.com/en/futures/{symbol}?ref=GRO_16987_24H8Y"
-                    )
-                    markup.add(button)
-                    TELEGRAM_BOT.send_message(chat_id, "Klik tombol di bawah untuk buka di aplikasi Binance:", reply_markup=markup)
+                    markup = InlineKeyboardMarkup([
+                        [
+                            InlineKeyboardButton("1 Menit", callback_data=f"CHART_{symbol}_1m"),
+                            InlineKeyboardButton("5 Menit", callback_data=f"CHART_{symbol}_5m"),
+                        ],
+                        [
+                            InlineKeyboardButton("15 Menit", callback_data=f"CHART_{symbol}_15m"),
+                            InlineKeyboardButton("1 Jam", callback_data=f"CHART_{symbol}_1h"),
+                        ]
+                    ])
+                    TELEGRAM_BOT.send_message(chat_id, f"Pilih timeframe untuk {symbol}:", reply_markup=markup)
                 except Exception as e:
                     TELEGRAM_BOT.send_message(chat_id, f"⚠️ Gagal mengambil chart: {e}")
             else:
                 TELEGRAM_BOT.send_message(chat_id, "⚠️ Format tidak valid. Contoh: `CHART BTCUSDT`", parse_mode="Markdown")
+            return "OK"
 
         # Cek simbol langsung
         if len(text) >= 6 and text.isalnum():
@@ -351,7 +372,7 @@ def webhook():
                 TELEGRAM_BOT.send_message(chat_id, message, parse_mode="Markdown")
 
                 if signal != "NONE":
-                    chart = send_all_timeframes(text)
+                    chart = draw_chart_by_timeframe(text, "1m")
                     if chart:
                         TELEGRAM_BOT.send_photo(chat_id, chart)
 
@@ -364,10 +385,11 @@ def webhook():
                     TELEGRAM_BOT.send_message(chat_id, "Klik tombol di bawah untuk buka di aplikasi Binance:", reply_markup=markup)
             except Exception as e:
                 TELEGRAM_BOT.send_message(chat_id, f"⚠️ Error analisis: {e}")
-        else:
-            TELEGRAM_BOT.send_message(chat_id, "⚠️ Format simbol tidak valid atau terlalu pendek.")
+            return "OK"
 
+        TELEGRAM_BOT.send_message(chat_id, "⚠️ Format simbol tidak valid atau terlalu pendek.")
     return "OK"
+
 
 if __name__ == '__main__':
     port = int(os.getenv("PORT", 5000))
