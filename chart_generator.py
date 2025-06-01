@@ -49,22 +49,23 @@ def calculate_supertrend(df, period=10, multiplier=3):
     supertrend = [True] * len(df)
 
     for i in range(1, len(df)):
-        if df['close'][i] > upperband[i - 1]:
+        if df['close'].iloc[i] > upperband.iloc[i - 1]:
             supertrend[i] = True
-        elif df['close'][i] < lowerband[i - 1]:
+        elif df['close'].iloc[i] < lowerband.iloc[i - 1]:
             supertrend[i] = False
         else:
             supertrend[i] = supertrend[i - 1]
-            if supertrend[i] and lowerband[i] < lowerband[i - 1]:
-                lowerband[i] = lowerband[i - 1]
-            if not supertrend[i] and upperband[i] > upperband[i - 1]:
-                upperband[i] = upperband[i - 1]
+            if supertrend[i] and lowerband.iloc[i] < lowerband.iloc[i - 1]:
+                lowerband.iloc[i] = lowerband.iloc[i - 1]
+            if not supertrend[i] and upperband.iloc[i] > upperband.iloc[i - 1]:
+                upperband.iloc[i] = upperband.iloc[i - 1]
 
     return pd.DataFrame({
         'supertrend': supertrend,
         'upperband': upperband,
         'lowerband': lowerband
     }, index=df.index)
+
 
 # === Multi Timeframe Chart ==
 # Update fungsi draw_multi_timeframe
