@@ -102,7 +102,7 @@ def draw_chart_by_timeframe(symbol='BTCUSDT', tf='1m'):
     ax1.plot(df.index, df['BB_lower'], color='blue', linestyle='--', linewidth=0.5)
 
     for j in range(1, len(df)):
-        color = 'green' if st['supertrend'][j] else 'red'
+        color = 'green' if st['supertrend'].iloc[j] else 'red'
         ax1.axvspan(df.index[j-1], df.index[j], color=color, alpha=0.03)
 
     # === Support & Resistance
