@@ -168,7 +168,27 @@ def draw_chart_by_timeframe(symbol='BTCUSDT', tf='1m'):
     ax2.legend(loc='upper left', fontsize=6)
     ax3.legend(loc='upper right', fontsize=6)
     ax2.grid(True)
+    
+    # Mapping offset waktu sesuai timeframe
+    offset_map = {
+    '1m': pd.Timedelta(minutes=2),
+    '5m': pd.Timedelta(minutes=10),
+    '15m': pd.Timedelta(minutes=20),
+    '1h': pd.Timedelta(hours=1),
+    '4h': pd.Timedelta(hours=2),
+    '1d': pd.Timedelta(days=1),
+     }
+     x_offset = offset_map.get(tf, pd.Timedelta(minutes=10))  # fallback ke 10m
 
+     # === Label harga saat ini (last price) ===
+     last_price = df['close'].iloc[-1]
+     x_pos = df.index[-1]
+
+     # Garis horizontal dan teks harga saat ini
+    ax1.axhline(last_price, color='black', linestyle='--', linewidth=0.6)
+    ax1.text(x_pos + x_offset, last_price, f'{last_price:.2f}',
+            va='center', ha='left', fontsize=8, color='black',
+            bbox=dict(facecolor='white', edgecolor='black', boxstyle='round,pad=0.2', alpha=0.7))
     # === Watermark
     fig.text(0.5, 0.5, "Signal Future Pro", fontsize=40, color='gray',
              ha='center', va='center', alpha=0.1, rotation=30)
