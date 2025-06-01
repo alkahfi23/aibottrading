@@ -95,12 +95,12 @@ def draw_chart_by_timeframe(symbol='BTCUSDT', tf='1m'):
 
     # Mapping offset waktu sesuai timeframe
     offset_map = {
-    '1m': pd.Timedelta(minutes=2),
-    '5m': pd.Timedelta(minutes=10),
-    '15m': pd.Timedelta(minutes=20),
-    '1h': pd.Timedelta(hours=1),
-    '4h': pd.Timedelta(hours=2),
-    '1d': pd.Timedelta(days=1),
+                '1m': pd.Timedelta(minutes=2),
+                '5m': pd.Timedelta(minutes=10),
+                '15m': pd.Timedelta(minutes=20),
+                '1h': pd.Timedelta(hours=1),
+                '4h': pd.Timedelta(hours=2),
+                '1d': pd.Timedelta(days=1),
      }
      x_offset = offset_map.get(tf, pd.Timedelta(minutes=10))  # fallback ke 10m
 
