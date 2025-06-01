@@ -7,7 +7,7 @@ import telebot
 from datetime import datetime
 from binance.client import Client
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-from chart_generator import send_all_timeframes  # Pastikan file ini tersedia dan berfungsi
+from chart_generator import draw_chart_by_timeframe  # Pastikan file ini tersedia dan berfungsi
 
 app = Flask(__name__)
 
