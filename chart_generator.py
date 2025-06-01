@@ -102,27 +102,32 @@ def draw_chart(ax, df, timeframe):
     ax.tick_params(axis='x', labelsize=6)
     ax.tick_params(axis='y', labelsize=6)
 
-# === Generate Chart & Send to Telegram ===
-def generate_and_send_chart(symbol='BTCUSDT'):
+# === Generate Chart ===
+def generate_chart(symbol='BTCUSDT'):
     timeframes = ['1m', '5m', '15m', '1h']
     fig, axs = plt.subplots(2, 2, figsize=(15, 10), sharex=False)
     axs = axs.flatten()
 
-    for i, tf in enumerate(timeframes):
-        try:
-            df = get_klines(symbol, interval=tf, limit=250)
-            draw_chart(axs[i], df, tf)
-        except Exception as e:
-            logging.warning(f"❌ Gagal memuat timeframe {tf}: {e}")
-            axs[i].set_title(f"{tf} - Error")
+    try:
+        for i, tf in enumerate(timeframes):
+            try:
+                df = get_klines(symbol, interval=tf, limit=250)
+                draw_chart(axs[i], df, tf)
+            except Exception as e:
+                logging.warning(f"❌ Gagal memuat timeframe {tf}: {e}")
+                axs[i].set_title(f"{tf} - Error")
 
-    fig.text(0.5, 0.02, 'Signal Future Pro', fontsize=20,
-             color='navy', ha='center', va='center', alpha=0.25, weight='bold')
-    plt.suptitle(f'{symbol} Multi Timeframe', fontsize=16, weight='bold')
-    plt.tight_layout(rect=[0, 0.03, 1, 0.97])
+        fig.text(0.5, 0.02, 'Signal Future Pro', fontsize=20,
+                 color='navy', ha='center', va='center', alpha=0.25, weight='bold')
+        plt.suptitle(f'{symbol} Multi Timeframe', fontsize=16, weight='bold')
+        plt.tight_layout(rect=[0, 0.03, 1, 0.97])
 
-    buf = BytesIO()
-    fig.savefig(buf, format='png')
-    buf.seek(0)
-    plt.close(fig)
+        buf = BytesIO()
+        plt.savefig(buf, format='png')
+        plt.close()
+        buf.seek(0)
+        return buf
 
+    except Exception as e:
+        logging.error(f"❌ Gagal generate chart {symbol}: {e}")
+        return None
