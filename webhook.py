@@ -274,7 +274,7 @@ def webhook():
                     message, signal, entry = analyze_multi_timeframe(symbol)
                     if signal == callback_data:
                         TELEGRAM_BOT.send_message(chat_id, message, parse_mode="Markdown")
-                        chart = generate_chart(symbol, signal, entry)
+                        chart = generate_chart(symbol)
                         if chart:
                             TELEGRAM_BOT.send_photo(chat_id=chat_id, photo=chart)
 
@@ -328,7 +328,7 @@ def webhook():
                     message, signal, entry = analyze_multi_timeframe(symbol)
                     TELEGRAM_BOT.send_message(chat_id, message, parse_mode="Markdown")
 
-                    chart = generate_chart(symbol, signal, entry)
+                    chart = generate_chart(symbol)
                     if chart:
                         TELEGRAM_BOT.send_photo(chat_id=chat_id, photo=chart)
 
@@ -351,7 +351,7 @@ def webhook():
                 TELEGRAM_BOT.send_message(chat_id, message, parse_mode="Markdown")
 
                 if signal != "NONE":
-                    chart = generate_chart(text, signal, entry)
+                    chart = generate_chart(text)
                     if chart:
                         TELEGRAM_BOT.send_photo(chat_id, chart)
 
