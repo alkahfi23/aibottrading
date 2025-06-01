@@ -88,9 +88,10 @@ def draw_chart_by_timeframe(symbol='BTCUSDT', tf='1m'):
     df_ohlc['Date'] = df_ohlc.index.map(mdates.date2num)
     ohlc = df_ohlc[['Date', 'open', 'high', 'low', 'close']]
 
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8), sharex=True,
-                                   gridspec_kw={'height_ratios': [3, 1]})
+    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(12, 9), sharex=True,
+                                        gridspec_kw={'height_ratios': [3, 1.5, 1]})
 
+    # Mapping offset waktu sesuai timeframe
     offset_map = {
         '1m': pd.Timedelta(minutes=2),
         '5m': pd.Timedelta(minutes=10),
@@ -101,6 +102,7 @@ def draw_chart_by_timeframe(symbol='BTCUSDT', tf='1m'):
     }
     x_offset = offset_map.get(tf, pd.Timedelta(minutes=10))
 
+    # === Candlestick chart
     candlestick_ohlc(ax1, ohlc.values, width=0.0005, colorup='g', colordown='r', alpha=0.8)
     ax1.plot(df.index, df['EMA50'], color='lime', label='EMA50')
     ax1.plot(df.index, df['EMA200'], color='orange', label='EMA200')
@@ -110,15 +112,16 @@ def draw_chart_by_timeframe(symbol='BTCUSDT', tf='1m'):
 
     for j in range(1, len(df)):
         color = 'green' if st['supertrend'].iloc[j] else 'red'
-        ax1.axvspan(df.index[j - 1], df.index[j], color=color, alpha=0.03)
+        ax1.axvspan(df.index[j-1], df.index[j], color=color, alpha=0.03)
 
+    # === Support & Resistance
     support_idx = argrelextrema(df['low'].values, np.less_equal, order=10)[0]
     resistance_idx = argrelextrema(df['high'].values, np.greater_equal, order=10)[0]
-
     support = df['low'].iloc[support_idx].tail(3)
     resistance = df['high'].iloc[resistance_idx].tail(3)
 
     x_pos = df.index[-1]
+
     for s in support:
         ax1.axhline(s, color='green', linestyle='--', linewidth=0.5)
         ax1.text(x_pos + x_offset, s, f'{s:.2f}', va='center', ha='left',
@@ -131,60 +134,68 @@ def draw_chart_by_timeframe(symbol='BTCUSDT', tf='1m'):
                  fontsize=7, color='red',
                  bbox=dict(facecolor='white', alpha=0.5, edgecolor='none'))
 
+    # === Harga Saat Ini
     last_price = df['close'].iloc[-1]
     ax1.axhline(last_price, color='black', linestyle='--', linewidth=0.6)
     ax1.text(x_pos + x_offset, last_price, f'{last_price:.2f}',
              va='center', ha='left', fontsize=8, color='black',
              bbox=dict(facecolor='white', edgecolor='black', boxstyle='round,pad=0.2', alpha=0.7))
 
-    last_close = df['close'].iloc[-1]
-    last_time = df.index[-1]
-
-    if not support.empty and last_close < support.min():
-        ax1.annotate("⬇️ Breakdown", xy=(last_time, last_close),
-                     xytext=(last_time, last_close * 1.01),
+    # === Breakout / Breakdown
+    if not support.empty and last_price < support.min():
+        ax1.annotate("⬇️ Breakdown", xy=(x_pos, last_price),
+                     xytext=(x_pos, last_price * 1.01),
                      arrowprops=dict(arrowstyle="->", color='red'),
                      color='red', fontsize=9, ha='center')
 
-    if not resistance.empty and last_close > resistance.max():
-        ax1.annotate("⬆️ Breakout", xy=(last_time, last_close),
-                     xytext=(last_time, last_close * 0.99),
+    if not resistance.empty and last_price > resistance.max():
+        ax1.annotate("⬆️ Breakout", xy=(x_pos, last_price),
+                     xytext=(x_pos, last_price * 0.99),
                      arrowprops=dict(arrowstyle="->", color='green'),
                      color='green', fontsize=9, ha='center')
 
-    ax1.set_title(f"{symbol} - {tf} Chart")
+    ax1.set_title(f"{symbol} - {tf.upper()} Chart")
     ax1.xaxis_date()
     ax1.legend(fontsize=6)
     ax1.grid(True)
 
+    # === RSI & MACD subplot
     ax2.plot(df.index, df['RSI'], label='RSI', color='purple')
     ax2.axhline(70, color='red', linestyle='--', linewidth=0.5)
     ax2.axhline(30, color='green', linestyle='--', linewidth=0.5)
 
-    ax3 = ax2.twinx()
-    ax3.plot(df.index, df['MACD'], label='MACD', color='black')
-    ax3.plot(df.index, df['MACD_signal'], label='Signal', color='orange', linestyle='--')
-    ax3.fill_between(df.index, df['MACD'] - df['MACD_signal'], 0,
-                     where=(df['MACD'] > df['MACD_signal']),
-                     alpha=0.2, color='green')
-    ax3.fill_between(df.index, df['MACD'] - df['MACD_signal'], 0,
-                     where=(df['MACD'] < df['MACD_signal']),
-                     alpha=0.2, color='red')
+    ax2b = ax2.twinx()
+    ax2b.plot(df.index, df['MACD'], label='MACD', color='black')
+    ax2b.plot(df.index, df['MACD_signal'], label='Signal', color='orange', linestyle='--')
+    ax2b.fill_between(df.index, df['MACD'] - df['MACD_signal'], 0,
+                      where=(df['MACD'] > df['MACD_signal']),
+                      alpha=0.2, color='green')
+    ax2b.fill_between(df.index, df['MACD'] - df['MACD_signal'], 0,
+                      where=(df['MACD'] < df['MACD_signal']),
+                      alpha=0.2, color='red')
 
     ax2.set_title("RSI & MACD")
     ax2.legend(loc='upper left', fontsize=6)
-    ax3.legend(loc='upper right', fontsize=6)
+    ax2b.legend(loc='upper right', fontsize=6)
     ax2.grid(True)
 
+    # === Volume bar subplot
+    colors = ['green' if c >= o else 'red' for c, o in zip(df['close'], df['open'])]
+    ax3.bar(df.index, df['volume'], color=colors, width=0.0005, alpha=0.4)
+    ax3.set_title("Volume")
+    ax3.grid(True)
+
+    # === Watermark
     fig.text(0.5, 0.5, "Signal Future Pro", fontsize=40, color='gray',
              ha='center', va='center', alpha=0.1, rotation=30)
 
-    plt.tight_layout()
+    plt.tight_layout(h_pad=1.5)
     buf = BytesIO()
     plt.savefig(buf, format='png')
     plt.close()
     buf.seek(0)
     return buf
+
 
 def send_all_timeframes(symbol='BTCUSDT'):
     timeframes = ['1m', '5m', '15m', '1h']
