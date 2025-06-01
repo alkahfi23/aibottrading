@@ -105,7 +105,7 @@ def draw_chart_by_timeframe(symbol='BTCUSDT', tf='1m'):
         color = 'green' if st['supertrend'][j] else 'red'
         ax1.axvspan(df.index[j-1], df.index[j], color=color, alpha=0.03)
 
-    # Support & Resistance
+    # === Support & Resistance
     support_idx = argrelextrema(df['low'].values, np.less_equal, order=10)[0]
     resistance_idx = argrelextrema(df['high'].values, np.greater_equal, order=10)[0]
     support = df['low'].iloc[support_idx].tail(3)
@@ -114,6 +114,22 @@ def draw_chart_by_timeframe(symbol='BTCUSDT', tf='1m'):
         ax1.axhline(s, color='green', linestyle='--', linewidth=0.5)
     for r in resistance:
         ax1.axhline(r, color='red', linestyle='--', linewidth=0.5)
+
+    # === Breakout / Breakdown Detection
+    last_close = df['close'].iloc[-1]
+    last_time = df.index[-1]
+
+    if not support.empty and last_close < support.min():
+        ax1.annotate("⬇️ Breakdown", xy=(last_time, last_close),
+                     xytext=(last_time, last_close * 1.01),
+                     arrowprops=dict(arrowstyle="->", color='red'),
+                     color='red', fontsize=9, ha='center')
+
+    if not resistance.empty and last_close > resistance.max():
+        ax1.annotate("⬆️ Breakout", xy=(last_time, last_close),
+                     xytext=(last_time, last_close * 0.99),
+                     arrowprops=dict(arrowstyle="->", color='green'),
+                     color='green', fontsize=9, ha='center')
 
     ax1.set_title(f"{symbol} - {tf} Chart")
     ax1.xaxis_date()
@@ -140,12 +156,17 @@ def draw_chart_by_timeframe(symbol='BTCUSDT', tf='1m'):
     ax3.legend(loc='upper right', fontsize=6)
     ax2.grid(True)
 
+    # === Watermark
+    fig.text(0.5, 0.5, "Signal Future Pro", fontsize=40, color='gray',
+             ha='center', va='center', alpha=0.1, rotation=30)
+
     plt.tight_layout()
     buf = BytesIO()
     plt.savefig(buf, format='png')
     plt.close()
     buf.seek(0)
     return buf
+
     
 def send_all_timeframes(symbol='BTCUSDT'):
     timeframes = ['1m', '5m', '15m', '1h']
