@@ -1,16 +1,20 @@
-import io
 import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
+import mplfinance as mpf
+import numpy as np
+from io import BytesIO
+from scipy.signal import argrelextrema
 from binance.client import Client
-import pandas as pd
 import os
+import pandas as pd
+import ta
 
-# Load API untuk ambil data chart
+# === Init Binance Client ===
 BINANCE_API_KEY = os.getenv("BINANCE_API_KEY")
 BINANCE_API_SECRET = os.getenv("BINANCE_API_SECRET")
 client = Client(BINANCE_API_KEY, BINANCE_API_SECRET)
 
-def get_ohlc(symbol, interval="1m", limit=100):
+# === Ambil Data Klines ===
+def get_klines(symbol: str, interval: str, limit: int = 250) -> pd.DataFrame:
     try:
         raw = client.get_klines(symbol=symbol, interval=interval, limit=limit)
         df = pd.DataFrame(raw, columns=[
@@ -20,44 +24,89 @@ def get_ohlc(symbol, interval="1m", limit=100):
         ])
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
         df.set_index('timestamp', inplace=True)
-        df = df[['open', 'high', 'low', 'close']]
-        df = df.astype(float)
-        return df
+        float_cols = ['open', 'high', 'low', 'close', 'volume']
+        df[float_cols] = df[float_cols].astype(float)
+        return df[float_cols]
     except Exception as e:
-        print(f"⚠️ Error get_ohlc: {e}")
+        print(f"❌ Error get_klines: {e}")
         return None
 
-def generate_chart(symbol, signal, entry_price):
-    df = get_ohlc(symbol, "1m", 100)
-    if df is None or df.empty:
-        return None
+# === Buat Chart per Timeframe ===
+def prepare_chart(df: pd.DataFrame, symbol: str, tf: str, entry_price=None, signal_type=None):
+    df['EMA50'] = ta.trend.ema_indicator(df['close'], window=50, fillna=True)
+    df['EMA200'] = ta.trend.ema_indicator(df['close'], window=200, fillna=True)
+    bb = ta.volatility.BollingerBands(close=df['close'], window=20, window_dev=2, fillna=True)
+    df['BB_upper'] = bb.bollinger_hband()
+    df['BB_lower'] = bb.bollinger_lband()
 
-    fig, ax = plt.subplots(figsize=(10, 5))
+    addplot = [
+        mpf.make_addplot(df['EMA50'], color='lime', width=1.2),
+        mpf.make_addplot(df['EMA200'], color='orangered', width=1.2),
+        mpf.make_addplot(df['BB_upper'], color='skyblue', linestyle='--', width=1),
+        mpf.make_addplot(df['BB_lower'], color='skyblue', linestyle='--', width=1),
+    ]
 
-    # Candlestick plot
-    for idx in range(len(df)):
-        o, h, l, c = df.iloc[idx]
-        color = 'green' if c >= o else 'red'
-        ax.plot([df.index[idx], df.index[idx]], [l, h], color='black')
-        ax.plot([df.index[idx], df.index[idx]], [o, c], linewidth=6, color=color)
+    if signal_type and entry_price:
+        df['entry_line'] = entry_price
+        last_index = len(df) - 1
+        marker_array = [np.nan] * last_index
+        marker_val = df['low'].iloc[-1] * 0.995 if signal_type == "LONG" else df['high'].iloc[-1] * 1.005
+        marker_color = 'green' if signal_type == "LONG" else 'red'
+        marker_symbol = '^' if signal_type == "LONG" else 'v'
+        marker_array.append(marker_val)
 
-    # Garis entry
-    if entry_price:
-        label = f"Entry ({signal})"
-        ax.axhline(entry_price, color='blue', linestyle='--', label=label)
+        addplot += [
+            mpf.make_addplot(marker_array, type='scatter', markersize=100, marker=marker_symbol, color=marker_color),
+            mpf.make_addplot(df['entry_line'], color='gray', linestyle='--', width=1)
+        ]
 
-    # Format chart
-    ax.set_title(f"{symbol} Chart - Sinyal {signal}")
-    ax.set_ylabel("Harga")
-    ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
-    ax.legend()
-    ax.grid(True)
+    fig, _ = mpf.plot(
+        df,
+        type='candle',
+        style='charles',
+        addplot=addplot,
+        returnfig=True,
+        title=f"{symbol} | TF: {tf}",
+        figsize=(6, 4),
+        tight_layout=True,
+    )
+    return fig
 
-    # Save chart to buffer
-    buf = io.BytesIO()
-    plt.tight_layout()
-    plt.savefig(buf, format='png')
-    plt.close(fig)
+# === Generate Multi-Timeframe Chart ===
+def generate_multitimeframe_chart(symbol: str, entry_price=None, signal_type=None) -> BytesIO:
+    timeframes = {"1m": "1 Minute", "5m": "5 Minute", "15m": "15 Minute", "1h": "1 Hour"}
+    figs = []
+
+    for tf in timeframes:
+        df = get_klines(symbol, interval=tf, limit=250)
+        if df is None or df.shape[0] < 200:
+            print(f"⚠️ Data {tf} tidak cukup.")
+            figs.append(None)
+            continue
+        fig = prepare_chart(df, symbol, tf, entry_price, signal_type)
+        figs.append(fig)
+
+    # Gabung ke satu canvas (2x2)
+    final_fig, axes = plt.subplots(2, 2, figsize=(16, 10))
+    plt.subplots_adjust(hspace=0.3, wspace=0.2)
+
+    for i, fig in enumerate(figs):
+        if fig:
+            buf = BytesIO()
+            fig.savefig(buf, format='png')
+            buf.seek(0)
+            img = plt.imread(buf)
+            ax = axes[i // 2, i % 2]
+            ax.imshow(img)
+            ax.axis('off')
+            plt.close(fig)
+        else:
+            axes[i // 2, i % 2].text(0.5, 0.5, 'No Data', ha='center', va='center')
+            axes[i // 2, i % 2].axis('off')
+
+    final_fig.suptitle(f"{symbol} - Multi-Timeframe Chart", fontsize=16, fontweight='bold')
+    buf = BytesIO()
+    final_fig.savefig(buf, format='png', bbox_inches='tight')
+    plt.close(final_fig)
     buf.seek(0)
-
     return buf
