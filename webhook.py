@@ -7,7 +7,7 @@ import telebot
 from datetime import datetime
 from binance.client import Client
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-from chart_generator import generate_and_send_chart  # Pastikan file ini tersedia dan berfungsi
+from chart_generator import generate_chart  # Pastikan file ini tersedia dan berfungsi
 
 app = Flask(__name__)
 
@@ -274,7 +274,7 @@ def webhook():
                     message, signal, entry = analyze_multi_timeframe(symbol)
                     if signal == callback_data:
                         TELEGRAM_BOT.send_message(chat_id, message, parse_mode="Markdown")
-                        chart = generate_and_send_chart(symbol, signal, entry)
+                        chart = generate_chart(symbol, signal, entry)
                         if chart:
                             TELEGRAM_BOT.send_photo(chat_id=chat_id, photo=chart)
 
@@ -328,7 +328,7 @@ def webhook():
                     message, signal, entry = analyze_multi_timeframe(symbol)
                     TELEGRAM_BOT.send_message(chat_id, message, parse_mode="Markdown")
 
-                    chart = generate_and_send_chart(symbol, signal, entry)
+                    chart = generate_chart(symbol, signal, entry)
                     if chart:
                         TELEGRAM_BOT.send_photo(chat_id=chat_id, photo=chart)
 
@@ -351,7 +351,7 @@ def webhook():
                 TELEGRAM_BOT.send_message(chat_id, message, parse_mode="Markdown")
 
                 if signal != "NONE":
-                    chart = generate_and_send_chart(text, signal, entry)
+                    chart = generate_chart(text, signal, entry)
                     if chart:
                         TELEGRAM_BOT.send_photo(chat_id, chart)
 
