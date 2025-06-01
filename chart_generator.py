@@ -66,9 +66,7 @@ def calculate_supertrend(df, period=10, multiplier=3):
         'lowerband': lowerband
     }, index=df.index)
 
-
-# === Multi Timeframe Chart ==
-# Update fungsi draw_multi_timeframe
+# === Multi Timeframe Chart ===
 def draw_chart_by_timeframe(symbol='BTCUSDT', tf='1m'):
     df = get_klines(symbol, interval=tf)
     df['EMA50'] = ta.trend.EMAIndicator(df['close'], 50).ema_indicator()
@@ -93,7 +91,6 @@ def draw_chart_by_timeframe(symbol='BTCUSDT', tf='1m'):
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8), sharex=True,
                                    gridspec_kw={'height_ratios': [3, 1]})
 
-    # Mapping offset waktu sesuai timeframe
     offset_map = {
         '1m': pd.Timedelta(minutes=2),
         '5m': pd.Timedelta(minutes=10),
@@ -101,10 +98,9 @@ def draw_chart_by_timeframe(symbol='BTCUSDT', tf='1m'):
         '1h': pd.Timedelta(hours=1),
         '4h': pd.Timedelta(hours=2),
         '1d': pd.Timedelta(days=1),
-     }
-     x_offset = offset_map.get(tf, pd.Timedelta(minutes=10))  # fallback ke 10m
+    }
+    x_offset = offset_map.get(tf, pd.Timedelta(minutes=10))
 
-    # === Candlestick chart
     candlestick_ohlc(ax1, ohlc.values, width=0.0005, colorup='g', colordown='r', alpha=0.8)
     ax1.plot(df.index, df['EMA50'], color='lime', label='EMA50')
     ax1.plot(df.index, df['EMA200'], color='orange', label='EMA200')
@@ -114,39 +110,33 @@ def draw_chart_by_timeframe(symbol='BTCUSDT', tf='1m'):
 
     for j in range(1, len(df)):
         color = 'green' if st['supertrend'].iloc[j] else 'red'
-        ax1.axvspan(df.index[j-1], df.index[j], color=color, alpha=0.03)
+        ax1.axvspan(df.index[j - 1], df.index[j], color=color, alpha=0.03)
 
-     # Support & Resistance dengan label harga tanpa menutupi candle
     support_idx = argrelextrema(df['low'].values, np.less_equal, order=10)[0]
     resistance_idx = argrelextrema(df['high'].values, np.greater_equal, order=10)[0]
 
     support = df['low'].iloc[support_idx].tail(3)
     resistance = df['high'].iloc[resistance_idx].tail(3)
 
-    x_pos = df.index[-1]  # ambil posisi x paling kanan
-    x_offset = pd.Timedelta(minutes=5)  # geser label sedikit ke kanan (tergantung tf)
-    # Tambahkan garis & label support
+    x_pos = df.index[-1]
     for s in support:
         ax1.axhline(s, color='green', linestyle='--', linewidth=0.5)
         ax1.text(x_pos + x_offset, s, f'{s:.2f}', va='center', ha='left',
-             fontsize=7, color='green',
-             bbox=dict(facecolor='white', alpha=0.5, edgecolor='none'))
+                 fontsize=7, color='green',
+                 bbox=dict(facecolor='white', alpha=0.5, edgecolor='none'))
 
-    # Tambahkan garis & label resistance
     for r in resistance:
         ax1.axhline(r, color='red', linestyle='--', linewidth=0.5)
         ax1.text(x_pos + x_offset, r, f'{r:.2f}', va='center', ha='left',
-             fontsize=7, color='red',
-             bbox=dict(facecolor='white', alpha=0.5, edgecolor='none'))
-        # === Harga saat ini ===
-        last_price = df['close'].iloc[-1]
-        x_pos = df.index[-1]
-        ax1.axhline(last_price, color='black', linestyle='--', linewidth=0.6)
-        ax1.text(x_pos + x_offset, last_price, f'{last_price:.2f}',
-              va='center', ha='left', fontsize=8, color='black',
-              bbox=dict(facecolor='white', edgecolor='black', boxstyle='round,pad=0.2', alpha=0.7))
+                 fontsize=7, color='red',
+                 bbox=dict(facecolor='white', alpha=0.5, edgecolor='none'))
 
-    # === Breakout / Breakdown Detection
+    last_price = df['close'].iloc[-1]
+    ax1.axhline(last_price, color='black', linestyle='--', linewidth=0.6)
+    ax1.text(x_pos + x_offset, last_price, f'{last_price:.2f}',
+             va='center', ha='left', fontsize=8, color='black',
+             bbox=dict(facecolor='white', edgecolor='black', boxstyle='round,pad=0.2', alpha=0.7))
+
     last_close = df['close'].iloc[-1]
     last_time = df.index[-1]
 
@@ -167,7 +157,6 @@ def draw_chart_by_timeframe(symbol='BTCUSDT', tf='1m'):
     ax1.legend(fontsize=6)
     ax1.grid(True)
 
-    # === RSI & MACD subplot
     ax2.plot(df.index, df['RSI'], label='RSI', color='purple')
     ax2.axhline(70, color='red', linestyle='--', linewidth=0.5)
     ax2.axhline(30, color='green', linestyle='--', linewidth=0.5)
@@ -186,8 +175,7 @@ def draw_chart_by_timeframe(symbol='BTCUSDT', tf='1m'):
     ax2.legend(loc='upper left', fontsize=6)
     ax3.legend(loc='upper right', fontsize=6)
     ax2.grid(True)
-    
-    # === Watermark
+
     fig.text(0.5, 0.5, "Signal Future Pro", fontsize=40, color='gray',
              ha='center', va='center', alpha=0.1, rotation=30)
 
@@ -198,7 +186,6 @@ def draw_chart_by_timeframe(symbol='BTCUSDT', tf='1m'):
     buf.seek(0)
     return buf
 
-    
 def send_all_timeframes(symbol='BTCUSDT'):
     timeframes = ['1m', '5m', '15m', '1h']
     for tf in timeframes:
@@ -209,4 +196,3 @@ def send_all_timeframes(symbol='BTCUSDT'):
         except Exception as e:
             logging.warning(f"Gagal kirim chart {tf}: {e}")
             bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"❌ Gagal kirim chart {symbol} - {tf}")
-
