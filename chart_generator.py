@@ -8,6 +8,7 @@ from binance.client import Client
 from scipy.signal import argrelextrema
 import ta
 import logging
+from telegram import Bot
 
 # === Konfigurasi ===
 BINANCE_API_KEY = os.getenv("BINANCE_API_KEY")
