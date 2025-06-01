@@ -105,15 +105,25 @@ def draw_chart_by_timeframe(symbol='BTCUSDT', tf='1m'):
         color = 'green' if st['supertrend'].iloc[j] else 'red'
         ax1.axvspan(df.index[j-1], df.index[j], color=color, alpha=0.03)
 
-    # === Support & Resistance
+    # Support & Resistance dengan label harga
     support_idx = argrelextrema(df['low'].values, np.less_equal, order=10)[0]
     resistance_idx = argrelextrema(df['high'].values, np.greater_equal, order=10)[0]
     support = df['low'].iloc[support_idx].tail(3)
     resistance = df['high'].iloc[resistance_idx].tail(3)
+
+    # Tambahkan garis dan label support
     for s in support:
-        ax1.axhline(s, color='green', linestyle='--', linewidth=0.5)
+      ax1.axhline(s, color='green', linestyle='--', linewidth=0.5)
+      ax1.text(df.index[-1], s, f'{s:.2f}', va='bottom', ha='right',
+             fontsize=7, color='green',
+             bbox=dict(facecolor='white', alpha=0.5, edgecolor='none'))
+
+# Tambahkan garis dan label resistance
     for r in resistance:
-        ax1.axhline(r, color='red', linestyle='--', linewidth=0.5)
+      ax1.axhline(r, color='red', linestyle='--', linewidth=0.5)
+      ax1.text(df.index[-1], r, f'{r:.2f}', va='top', ha='right',
+             fontsize=7, color='red',
+             bbox=dict(facecolor='white', alpha=0.5, edgecolor='none'))
 
     # === Breakout / Breakdown Detection
     last_close = df['close'].iloc[-1]
