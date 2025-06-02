@@ -83,6 +83,7 @@ def draw_chart_by_timeframe(symbol='BTCUSDT', tf='1m'):
     df['MACD_signal'] = macd.macd_signal()
 
     st = calculate_supertrend(df)
+    df['Volume_MA20'] = df['volume'].rolling(window=20).mean()
 
     df_ohlc = df[['open', 'high', 'low', 'close']].copy()
     df_ohlc['Date'] = df_ohlc.index.map(mdates.date2num)
@@ -91,7 +92,6 @@ def draw_chart_by_timeframe(symbol='BTCUSDT', tf='1m'):
     fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(12, 9), sharex=True,
                                         gridspec_kw={'height_ratios': [3, 1.5, 1]})
 
-    # Mapping offset waktu sesuai timeframe
     offset_map = {
         '1m': pd.Timedelta(minutes=2),
         '5m': pd.Timedelta(minutes=10),
@@ -102,7 +102,7 @@ def draw_chart_by_timeframe(symbol='BTCUSDT', tf='1m'):
     }
     x_offset = offset_map.get(tf, pd.Timedelta(minutes=10))
 
-    # === Candlestick chart
+    # === Candlestick
     candlestick_ohlc(ax1, ohlc.values, width=0.0005, colorup='g', colordown='r', alpha=0.8)
     ax1.plot(df.index, df['EMA50'], color='lime', label='EMA50')
     ax1.plot(df.index, df['EMA200'], color='orange', label='EMA200')
@@ -134,20 +134,18 @@ def draw_chart_by_timeframe(symbol='BTCUSDT', tf='1m'):
                  fontsize=7, color='red',
                  bbox=dict(facecolor='white', alpha=0.5, edgecolor='none'))
 
-    # === Harga Saat Ini
+    # === Last Price & Breaks
     last_price = df['close'].iloc[-1]
     ax1.axhline(last_price, color='black', linestyle='--', linewidth=0.6)
     ax1.text(x_pos + x_offset, last_price, f'{last_price:.2f}',
              va='center', ha='left', fontsize=8, color='black',
              bbox=dict(facecolor='white', edgecolor='black', boxstyle='round,pad=0.2', alpha=0.7))
 
-    # === Breakout / Breakdown
     if not support.empty and last_price < support.min():
         ax1.annotate("⬇️ Breakdown", xy=(x_pos, last_price),
                      xytext=(x_pos, last_price * 1.01),
                      arrowprops=dict(arrowstyle="->", color='red'),
                      color='red', fontsize=9, ha='center')
-
     if not resistance.empty and last_price > resistance.max():
         ax1.annotate("⬆️ Breakout", xy=(x_pos, last_price),
                      xytext=(x_pos, last_price * 0.99),
@@ -159,7 +157,7 @@ def draw_chart_by_timeframe(symbol='BTCUSDT', tf='1m'):
     ax1.legend(fontsize=6)
     ax1.grid(True)
 
-    # === RSI & MACD subplot
+    # === RSI & MACD
     ax2.plot(df.index, df['RSI'], label='RSI', color='purple')
     ax2.axhline(70, color='red', linestyle='--', linewidth=0.5)
     ax2.axhline(30, color='green', linestyle='--', linewidth=0.5)
@@ -168,21 +166,31 @@ def draw_chart_by_timeframe(symbol='BTCUSDT', tf='1m'):
     ax2b.plot(df.index, df['MACD'], label='MACD', color='black')
     ax2b.plot(df.index, df['MACD_signal'], label='Signal', color='orange', linestyle='--')
     ax2b.fill_between(df.index, df['MACD'] - df['MACD_signal'], 0,
-                      where=(df['MACD'] > df['MACD_signal']),
-                      alpha=0.2, color='green')
+                      where=(df['MACD'] > df['MACD_signal']), alpha=0.2, color='green')
     ax2b.fill_between(df.index, df['MACD'] - df['MACD_signal'], 0,
-                      where=(df['MACD'] < df['MACD_signal']),
-                      alpha=0.2, color='red')
-
+                      where=(df['MACD'] < df['MACD_signal']), alpha=0.2, color='red')
     ax2.set_title("RSI & MACD")
     ax2.legend(loc='upper left', fontsize=6)
     ax2b.legend(loc='upper right', fontsize=6)
     ax2.grid(True)
 
-    # === Volume bar subplot
+    # === Volume with MA
+    width_map = {
+        '1m': 0.0005,
+        '5m': 0.002,
+        '15m': 0.005,
+        '1h': 0.01,
+        '4h': 0.02,
+        '1d': 0.05
+    }
+    bar_width = width_map.get(tf, 0.002)
     colors = ['green' if c >= o else 'red' for c, o in zip(df['close'], df['open'])]
-    ax3.bar(df.index, df['volume'], color=colors, width=0.0005, alpha=0.4)
+
+    ax3.bar(df.index, df['volume'], color=colors, width=bar_width, alpha=0.4, label='Volume')
+    ax3.plot(df.index, df['Volume_MA20'], color='blue', linewidth=0.8, label='Volume MA20')
     ax3.set_title("Volume")
+    ax3.set_ylabel("Volume", fontsize=8)
+    ax3.legend(fontsize=6)
     ax3.grid(True)
 
     # === Watermark
@@ -195,7 +203,6 @@ def draw_chart_by_timeframe(symbol='BTCUSDT', tf='1m'):
     plt.close()
     buf.seek(0)
     return buf
-
 
 def send_all_timeframes(symbol='BTCUSDT'):
     timeframes = ['1m', '5m', '15m', '1h']
