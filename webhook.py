@@ -7,6 +7,7 @@ import telebot
 from datetime import datetime
 from binance.client import Client
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+from ta.momentum import RSIIndicator
 from chart_generator import draw_chart_by_timeframe  # Pastikan file ini tersedia dan berfungsi
 
 app = Flask(__name__)
@@ -53,13 +54,17 @@ def get_klines(symbol, interval="5m", limit=100):
 
 def is_rsi_oversold(symbol, interval="15m", limit=100):
     df = get_klines(symbol, interval, limit)
-    if df.empty or len(df) < 15:
+    if df is None or df.empty or len(df) < 15:
         return False, None
 
-    df.ta.rsi(length=14, append=True)
-    latest_rsi = df["RSI_14"].iloc[-1]
-    return latest_rsi < 30, latest_rsi
-
+    try:
+        rsi_indicator = ta.momentum.RSIIndicator(close=df["close"], window=14)
+        df["RSI_14"] = rsi_indicator.rsi()
+        latest_rsi = df["RSI_14"].iloc[-1]
+        return latest_rsi < 30, latest_rsi
+    except Exception as e:
+        print(f"❌ Error hitung RSI {symbol}: {e}")
+        return False, None
 
 # Ganti fungsi ini
 def detect_reversal_candle(df):
