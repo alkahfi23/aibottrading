@@ -345,7 +345,7 @@ def webhook():
             rsi_results = []
             for symbol in POPULAR_SYMBOLS:
                 try:
-                    df = get_klines(symbol, interval="1m", limit=100)
+                    df = get_klines(symbol, interval="15m", limit=100)
                     if df is None or df.empty:
                         continue
 
