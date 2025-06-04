@@ -339,6 +339,32 @@ def webhook():
             TELEGRAM_BOT.send_message(chat_id, help_text, parse_mode="Markdown", reply_markup=markup)
             return "OK"
 
+          elif text == "RSI":
+            TELEGRAM_BOT.send_message(chat_id, "📉 Mencari coin dengan RSI < 10 di timeframe 1m...")
+
+            rsi_results = []
+            for symbol in POPULAR_SYMBOLS:
+                try:
+                    df = get_klines(symbol, interval="1m", limit=100)
+                    if df is None or df.empty:
+                        continue
+
+                    rsi = ta.momentum.RSIIndicator(df['close'], window=14).rsi().iloc[-1]
+                    if rsi < 10:
+                        rsi_results.append((symbol, round(rsi, 2)))
+                except Exception as e:
+                    print(f"❌ Error RSI {symbol}: {e}")
+                    continue
+
+            if rsi_results:
+                msg = "*🔎 Coin dengan RSI < 10 (Oversold):*\n\n"
+                for s, r in rsi_results:
+                    msg += f"- `{s}` RSI: *{r}*\n"
+                TELEGRAM_BOT.send_message(chat_id, msg, parse_mode="Markdown")
+            else:
+                TELEGRAM_BOT.send_message(chat_id, "✅ Tidak ada coin dengan RSI < 10 saat ini.")
+            return "OK"
+
         # Cek perintah CHART SYMBOL
         if text.startswith("CHART "):
             parts = text.split()
