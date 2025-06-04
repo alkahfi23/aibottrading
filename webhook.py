@@ -1,6 +1,7 @@
 from flask import Flask, request
 import os
 import pandas as pd
+import pandas_ta as ta
 import numpy as np
 import ta
 import telebot
