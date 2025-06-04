@@ -51,6 +51,15 @@ def get_klines(symbol, interval="5m", limit=100):
         print(f"❌ ERROR get_klines({symbol}, {interval}): {e}")
         return None
 
+def is_rsi_oversold(symbol, interval="15m", limit=100):
+    try:
+        df = fetch_ohlcv(symbol, interval=interval, limit=limit)
+        df["RSI"] = ta.rsi(df["close"], length=14)
+        latest_rsi = df["RSI"].iloc[-1]
+        return latest_rsi < 30, latest_rsi
+    except Exception as e:
+        print(f"⚠️ Gagal cek RSI untuk {symbol}: {e}")
+        return False, None
 
 # Ganti fungsi ini
 def detect_reversal_candle(df):
@@ -293,8 +302,6 @@ def webhook():
                 TELEGRAM_BOT.send_message(chat_id, f"❌ Tidak ditemukan sinyal `{callback_data}` saat ini.", parse_mode="Markdown")
             return "OK"
 
-        # === Handle callback untuk tombol pilihan timeframe chart ===
-        # Format callback_data = "CHART_SYMBOL_TIMEFRAME"
         if callback_data.startswith("CHART_"):
             try:
                 _, symbol, timeframe = callback_data.split("_")
@@ -317,7 +324,8 @@ def webhook():
     if "message" in data and "text" in data["message"]:
         text = data["message"]["text"].strip().upper()
         chat_id = data["message"]["chat"]["id"]
-        
+
+        # === HELP ===
         if text == "/HELP":
             help_text = (
                 "🤖 *Panduan Bot Signal Trading:*\n\n"
@@ -325,6 +333,7 @@ def webhook():
                 "/BACKTEST — Jalankan backtest semua pair populer\n"
                 "LONG — Cari sinyal BUY (naik)\n"
                 "SHORT — Cari sinyal SELL (turun)\n"
+                "RSI — Tampilkan coin dengan RSI Oversold (15m)\n"
                 "CHART BTCUSDT — Lihat chart + sinyal untuk pair tertentu\n"
                 "BTCUSDT, ETHUSDT, dst — Analisa spesifik pair\n"
                 "/HELP — Tampilkan bantuan ini\n\n"
@@ -338,11 +347,35 @@ def webhook():
                     InlineKeyboardButton("⛔ Cari SHORT", callback_data="SHORT")
                 ]
             ])
-            
+
             TELEGRAM_BOT.send_message(chat_id, help_text, parse_mode="Markdown", reply_markup=markup)
             return "OK"
-          
-        # Cek perintah CHART SYMBOL
+
+        # === RSI Oversold ===
+        if text == "RSI":
+            TELEGRAM_BOT.send_message(chat_id, "📉 Mendeteksi RSI oversold pada coin populer (15m)...")
+            oversold_list = []
+
+            for symbol in POPULAR_SYMBOLS:
+                try:
+                    is_oversold, rsi_val = is_rsi_oversold(symbol, interval="15m")
+                    if is_oversold:
+                        oversold_list.append(f"🔻 *{symbol}* - RSI: `{rsi_val:.2f}`")
+
+                        chart = draw_chart_by_timeframe(symbol, "15m")
+                        if chart:
+                            TELEGRAM_BOT.send_photo(chat_id=chat_id, photo=chart, caption=f"{symbol} - RSI: {rsi_val:.2f}")
+                except Exception as e:
+                    print(f"Error cek RSI {symbol}: {e}")
+
+            if oversold_list:
+                reply = "*Coin dengan RSI Oversold (15m)*:\n\n" + "\n".join(oversold_list)
+            else:
+                reply = "✅ Tidak ada coin dengan RSI < 30 di timeframe 15m saat ini."
+            TELEGRAM_BOT.send_message(chat_id, reply, parse_mode="Markdown")
+            return "OK"
+
+        # === CHART SYMBOL ===
         if text.startswith("CHART "):
             parts = text.split()
             if len(parts) == 2:
@@ -368,7 +401,7 @@ def webhook():
                 TELEGRAM_BOT.send_message(chat_id, "⚠️ Format tidak valid. Contoh: `CHART BTCUSDT`", parse_mode="Markdown")
             return "OK"
 
-        # Cek simbol langsung
+        # === Simbol langsung ===
         if len(text) >= 6 and text.isalnum():
             try:
                 message, signal, entry = analyze_multi_timeframe(text)
