@@ -249,32 +249,6 @@ def analyze_multi_timeframe(symbol):
 
     return result, signal or "NONE", entry or 0
 
-def find_oversold_coins(timeframe="15m", rsi_threshold=10, limit=100):
-    oversold = []
-    for symbol in POPULAR_SYMBOLS:
-        try:
-            df = get_klines(symbol, interval=timeframe, limit=limit)
-            if df is None or df.empty:
-                continue
-
-            rsi = ta.momentum.RSIIndicator(df['close'], window=14).rsi().iloc[-1]
-            if rsi < rsi_threshold:
-                oversold.append((symbol, round(rsi, 2)))
-        except Exception as e:
-            print(f"❌ Error RSI {symbol}: {e}")
-            continue
-    return oversold
-    
-def handle_rsi_command(chat_id):
-    TELEGRAM_BOT.send_message(chat_id, "📉 Mencari coin dengan RSI < 10 di timeframe 15m...")
-
-    rsi_results = find_oversold_coins()
-    if rsi_results:
-        msg = "*🔎 Coin dengan RSI < 10 (Oversold):*\n\n"
-        msg += "\n".join(f"- `{symbol}` RSI: *{rsi}*" for symbol, rsi in rsi_results)
-        TELEGRAM_BOT.send_message(chat_id, msg, parse_mode="Markdown")
-    else:
-        TELEGRAM_BOT.send_message(chat_id, "✅ Tidak ada coin dengan RSI < 10 saat ini.")
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
@@ -365,11 +339,6 @@ def webhook():
             ])
             TELEGRAM_BOT.send_message(chat_id, help_text, parse_mode="Markdown", reply_markup=markup)
             return "OK"
-
-           # Pemanggilan dalam handler
-           elif text == "RSI":
-           handle_rsi_command(chat_id)
-           return "OK"
           
         # Cek perintah CHART SYMBOL
         if text.startswith("CHART "):
