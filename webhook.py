@@ -320,17 +320,16 @@ def webhook():
         
         if text == "/HELP":
            help_text = (
-                    "🤖 *Panduan Bot Signal Trading:*\n\n"
-                    "🔍 Kirim salah satu perintah berikut:\n"
-                    "/BACKTEST — Jalankan backtest semua pair populer\n"
-                    "LONG — Cari sinyal BUY (naik)\n"
-                    "SHORT — Cari sinyal SELL (turun)\n"
-                    "CHART BTCUSDT — Lihat chart + sinyal untuk pair tertentu\n"
-                    "BTCUSDT, ETHUSDT, dst — Analisa spesifik pair\n"
-                    "/HELP — Tampilkan bantuan ini\n\n"
-                    "💡 Tips: Gunakan di saat volatilitas tinggi untuk sinyal terbaik."
-                )
-            
+                "🤖 *Panduan Bot Signal Trading:*\n\n"
+                "🔍 Kirim salah satu perintah berikut:\n"
+                "/BACKTEST — Jalankan backtest semua pair populer\n"
+                "LONG — Cari sinyal BUY (naik)\n"
+                "SHORT — Cari sinyal SELL (turun)\n"
+                "CHART BTCUSDT — Lihat chart + sinyal untuk pair tertentu\n"
+                "BTCUSDT, ETHUSDT, dst — Analisa spesifik pair\n"
+                "/HELP — Tampilkan bantuan ini\n\n"
+                "💡 Tips: Gunakan di saat volatilitas tinggi untuk sinyal terbaik."
+            )
             markup = InlineKeyboardMarkup([
                 [
                     InlineKeyboardButton("🔁 Backtest", callback_data="BACKTEST"),
