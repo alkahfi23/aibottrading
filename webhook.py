@@ -317,25 +317,6 @@ def webhook():
     if "message" in data and "text" in data["message"]:
         text = data["message"]["text"].strip().upper()
         chat_id = data["message"]["chat"]["id"]
-
-        if text == "RSI":
-                TELEGRAM_BOT.send_message(chat_id, "🔎 Mencari coin dengan RSI 15m < 10 (oversold)...")
-                found = []
-            for symbol in POPULAR_SYMBOLS:
-                df = get_klines(symbol, "15m", 100)
-            if df is None or df.empty:
-                continue
-            df['RSI'] = ta.momentum.RSIIndicator(df['close'], window=14).rsi()
-            latest_rsi = df['RSI'].iloc[-1]
-            if latest_rsi < 10:
-                found.append(f"✅ {symbol} — RSI: {latest_rsi:.2f} (Oversold)")
-            if found:
-                result = "*Coin dengan RSI 15m < 10 (Oversold):*\n\n" + "\n".join(found)
-            else:
-                result = "❌ Tidak ada coin dengan RSI 15m < 10 saat ini."
-                TELEGRAM_BOT.send_message(chat_id, result, parse_mode="Markdown")
-            return "OK"
-
         
         if text == "/HELP":
            help_text = (
@@ -344,7 +325,6 @@ def webhook():
                 "/BACKTEST — Jalankan backtest semua pair populer\n"
                 "LONG — Cari sinyal BUY (naik)\n"
                 "SHORT — Cari sinyal SELL (turun)\n"
-                "RSI — Cari coin yang RSI 15m-nya di bawah 10 (oversold extreme)\n"
                 "CHART BTCUSDT — Lihat chart + sinyal untuk pair tertentu\n"
                 "BTCUSDT, ETHUSDT, dst — Analisa spesifik pair\n"
                 "/HELP — Tampilkan bantuan ini\n\n"
