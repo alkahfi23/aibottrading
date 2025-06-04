@@ -319,7 +319,7 @@ def webhook():
         chat_id = data["message"]["chat"]["id"]
         
         if text == "/HELP":
-           help_text = (
+            help_text = (
                 "🤖 *Panduan Bot Signal Trading:*\n\n"
                 "🔍 Kirim salah satu perintah berikut:\n"
                 "/BACKTEST — Jalankan backtest semua pair populer\n"
@@ -330,6 +330,7 @@ def webhook():
                 "/HELP — Tampilkan bantuan ini\n\n"
                 "💡 Tips: Gunakan di saat volatilitas tinggi untuk sinyal terbaik."
             )
+
             markup = InlineKeyboardMarkup([
                 [
                     InlineKeyboardButton("🔁 Backtest", callback_data="BACKTEST"),
@@ -337,6 +338,7 @@ def webhook():
                     InlineKeyboardButton("⛔ Cari SHORT", callback_data="SHORT")
                 ]
             ])
+            
             TELEGRAM_BOT.send_message(chat_id, help_text, parse_mode="Markdown", reply_markup=markup)
             return "OK"
           
