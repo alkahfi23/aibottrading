@@ -53,7 +53,7 @@ def get_klines(symbol, interval="5m", limit=100):
 
 def is_rsi_oversold(symbol, interval="15m", limit=100):
     try:
-        df = fetch_ohlcv(symbol, interval=interval, limit=limit)
+        df = get_klines(symbol, interval=interval, limit=limit)
         df["RSI"] = ta.rsi(df["close"], length=14)
         latest_rsi = df["RSI"].iloc[-1]
         return latest_rsi < 30, latest_rsi
