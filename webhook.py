@@ -53,14 +53,14 @@ def get_klines(symbol, interval="5m", limit=100):
         return None
 
 def is_rsi_oversold(symbol, interval="15m", limit=100):
-    try:
-        df = get_klines(symbol, interval=interval, limit=limit)
-        df["RSI"] = ta.rsi(df["close"], length=14)
-        latest_rsi = df["RSI"].iloc[-1]
-        return latest_rsi < 30, latest_rsi
-    except Exception as e:
-        print(f"⚠️ Gagal cek RSI untuk {symbol}: {e}")
+    df = get_klines(symbol, interval, limit)
+    if df.empty or len(df) < 15:
         return False, None
+
+    df.ta.rsi(length=14, append=True)
+    latest_rsi = df["RSI_14"].iloc[-1]
+    return latest_rsi < 30, latest_rsi
+
 
 # Ganti fungsi ini
 def detect_reversal_candle(df):
