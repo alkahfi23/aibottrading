@@ -65,6 +65,20 @@ def is_rsi_oversold(symbol, interval="15m", limit=100):
     except Exception as e:
         print(f"❌ Error hitung RSI {symbol}: {e}")
         return False, None
+        
+def check_rsi_overbought(symbols, interval="15m", limit=100):
+    overbought_list = []
+    for symbol in symbols:
+        df = get_klines(symbol, interval, limit)
+        if df is None or len(df) < 15:
+            continue
+        try:
+            rsi = ta.momentum.RSIIndicator(df['close'], window=14).rsi().iloc[-1]
+            if rsi > 70:
+                overbought_list.append((symbol, round(rsi, 2)))
+        except Exception as e:
+            print(f"❌ Error RSI {symbol}: {e}")
+    return sorted(overbought_list, key=lambda x: -x[1])  # Urutkan dari RSI tertinggi
 
 # Ganti fungsi ini
 def detect_reversal_candle(df):
@@ -339,6 +353,7 @@ def webhook():
                 "LONG — Cari sinyal BUY (naik)\n"
                 "SHORT — Cari sinyal SELL (turun)\n"
                 "RSI — Tampilkan coin dengan RSI Oversold (15m)\n"
+                "RSIS — Tampilkan coin dengan RSI > 70 (Overbought)\n"
                 "CHART BTCUSDT — Lihat chart + sinyal untuk pair tertentu\n"
                 "BTCUSDT, ETHUSDT, dst — Analisa spesifik pair\n"
                 "/HELP — Tampilkan bantuan ini\n\n"
@@ -355,6 +370,20 @@ def webhook():
 
             TELEGRAM_BOT.send_message(chat_id, help_text, parse_mode="Markdown", reply_markup=markup)
             return "OK"
+            
+         # === RSI Overbought ===
+        elif text == "RSIS":
+            TELEGRAM_BOT.send_message(chat_id, "📈 Mengecek RSI Overbought di 15m timeframe...")
+            result = check_rsi_overbought(POPULAR_SYMBOLS, interval="15m")
+            if not result:
+                TELEGRAM_BOT.send_message(chat_id, "⚠️ Tidak ditemukan coin dengan RSI > 70 saat ini.")
+            else:
+                msg = "*📊 RSI Overbought 15m:*\n\n"
+                msg += "Pair | RSI\n"
+                msg += "-" * 15 + "\n"
+                for sym, rsi in result:
+                    msg += f"{sym} | {rsi}\n"
+                TELEGRAM_BOT.send_message(chat_id, msg, parse_mode="Markdown")
 
         # === RSI Oversold ===
         if text == "RSI":
