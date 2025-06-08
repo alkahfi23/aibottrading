@@ -52,6 +52,16 @@ def get_klines(symbol, interval="5m", limit=100):
         print(f"❌ ERROR get_klines({symbol}, {interval}): {e}")
         return None
 
+def get_24h_high_low(symbol):
+    try:
+        ticker = client.get_ticker(symbol=symbol)
+        high = float(ticker['highPrice'])
+        low = float(ticker['lowPrice'])
+        return high, low
+    except Exception as e:
+        print(f"❌ Gagal ambil 24h high/low untuk {symbol}: {e}")
+        return None, None
+
 def is_rsi_oversold(symbol, interval="15m", limit=100):
     df = get_klines(symbol, interval, limit)
     if df is None or df.empty or len(df) < 15:
@@ -202,14 +212,11 @@ def format_summary(summary):
         lines.append(f"{s['symbol']} | {s['total_trades']} | {s['wins']} | {s['losses']} | {s['accuracy']}% | {s['avg_rr']} | {s['profit_factor']}")
     return "\n".join(lines)
 
-    
 def analyze_multi_timeframe(symbol):
-    # Ambil data per timeframe
     df_15m = get_klines(symbol, '15m', 500)
     df_5m = get_klines(symbol, '5m', 500)
     df_1m = get_klines(symbol, '1m', 500)
 
-    # Cek error pengambilan data
     if df_1m is None or df_5m is None or df_15m is None:
         print(f"⚠️ Gagal ambil data untuk {symbol}. Timeframe yang error:")
         if df_15m is None: print("- 15m")
@@ -228,7 +235,6 @@ def analyze_multi_timeframe(symbol):
         print(f"❌ Error hitung indikator: {e}")
         return f"❌ Error indikator {symbol}: {e}", "ERROR", 0
 
-    # Analisis sinyal
     signal = None
     entry = None
     stop_loss = None
@@ -240,8 +246,16 @@ def analyze_multi_timeframe(symbol):
     trend_5m = "UP" if df_5m['close'].iloc[-1] > df_5m['EMA20'].iloc[-1] else "DOWN"
     last = df_1m.iloc[-1]
 
+    # Ambil high/low 24 jam
+    high_24h, low_24h = get_24h_high_low(symbol)
+    if high_24h is None or low_24h is None:
+        return f"❌ Gagal ambil data 24H untuk {symbol}", "ERROR", 0
+
+    is_near_24h_low = current_price <= (low_24h + 0.01 * low_24h)
+    is_near_24h_high = current_price >= (high_24h - 0.01 * high_24h)
+
     if trend_15m == "UP" and trend_5m == "UP":
-        if last['RSI'] < 30 and last['close'] < last['BB_L'] and candle_pattern in ['Hammer', 'InvertedHammer', 'Engulfing']:
+        if last['RSI'] < 30 and last['close'] < last['BB_L'] and is_near_24h_low and candle_pattern in ['Hammer', 'InvertedHammer', 'Engulfing']:
             signal = "LONG"
             entry = current_price
             prev_below_bb = df_1m[:-1][df_1m['close'] < df_1m['BB_L']]
@@ -250,7 +264,7 @@ def analyze_multi_timeframe(symbol):
             take_profit = entry + (2 * risk)
 
     elif trend_15m == "DOWN" and trend_5m == "DOWN":
-        if last['RSI'] > 70 and last['close'] > last['BB_H'] and candle_pattern in ['ShootingStar', 'Engulfing']:
+        if last['RSI'] > 70 and last['close'] > last['BB_H'] and is_near_24h_high and candle_pattern in ['ShootingStar', 'Engulfing']:
             signal = "SHORT"
             entry = current_price
             prev_above_bb = df_1m[:-1][df_1m['close'] > df_1m['BB_H']]
@@ -258,7 +272,6 @@ def analyze_multi_timeframe(symbol):
             risk = stop_loss - entry
             take_profit = entry - (2 * risk)
 
-    # Format hasil
     result = f"⏰ Time: {datetime.now().strftime('%H:%M:%S')}\n"
     result += f"📉 Pair: {symbol}\n"
     result += f"Trend 15m: {trend_15m}\n"
@@ -266,6 +279,13 @@ def analyze_multi_timeframe(symbol):
     result += f"🕯️ RSI 1m: {last['RSI']:.2f}\n"
     result += f"📊 Harga Sekarang: {current_price:.2f}\n"
     result += f"🕯️ Pola Candle Terbaca: `{candle_pattern or 'Tidak ada'}`\n"
+    result += f"📈 High 24H: {high_24h:.2f}\n"
+    result += f"📉 Low 24H: {low_24h:.2f}\n"
+
+    if is_near_24h_low:
+        result += "⚠️ Dekat dengan **LOW 24H** (potensi rebound)\n"
+    if is_near_24h_high:
+        result += "⚠️ Dekat dengan **HIGH 24H** (potensi koreksi)\n"
 
     if signal:
         result += f"\n✅ Sinyal Terdeteksi: {signal}\n"
@@ -276,6 +296,7 @@ def analyze_multi_timeframe(symbol):
         result += "\n🚫 Tidak ada sinyal valid saat ini."
 
     return result, signal or "NONE", entry or 0
+
 
 
 @app.route("/webhook", methods=["POST"])
