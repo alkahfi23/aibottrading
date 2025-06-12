@@ -62,7 +62,7 @@ def get_24h_high_low(symbol):
         print(f"❌ Gagal ambil 24h high/low untuk {symbol}: {e}")
         return None, None
 
-def is_rsi_oversold(symbol, interval="15m", limit=100):
+def is_rsi_oversold(symbol, interval="1h", limit=100):
     df = get_klines(symbol, interval, limit)
     if df is None or df.empty or len(df) < 15:
         return False, None
@@ -76,7 +76,7 @@ def is_rsi_oversold(symbol, interval="15m", limit=100):
         print(f"❌ Error hitung RSI {symbol}: {e}")
         return False, None
         
-def check_rsi_overbought(symbols, interval="15m", limit=100):
+def check_rsi_overbought(symbols, interval="1h", limit=100):
     overbought_list = []
     for symbol in symbols:
         df = get_klines(symbol, interval, limit)
