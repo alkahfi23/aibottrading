@@ -7,4 +7,3 @@ python-binance
 ta
 pyTelegramBotAPI
 scipy
-TA-Lib
