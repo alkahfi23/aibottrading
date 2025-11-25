@@ -33,8 +33,7 @@ def webhook():
             result = analyze_pair(text)
             chart_path = generate_chart(text)
 
-            msg = f"\ud83d\udd39 *Analisa Futures {text}*
-\n" \
+            msg = f"*Analisa Futures {text}*\n" \
                   f"*Harga:* {result['price']}\n" \
                   f"*Sinyal:* `{result['signal']}`\n" \
                   f"*Volume Spike:* {result['volume_spike']}\n" \
